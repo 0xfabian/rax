@@ -33,4 +33,6 @@ std::vector<Token> get_tokens(std::string line);
 
 int get_register_size(const std::string& str);
 int get_register_index(const std::string& str);
+int get_simd_register_index(const std::string& str);
 bool is_register(const std::string& str);
+bool is_simd_register(const std::string& str);

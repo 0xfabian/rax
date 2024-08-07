@@ -68,7 +68,7 @@ void Assembler::dump()
     {
         printf("section %s\n{\n    ", sec.name.c_str());
 
-        for (int i = 0; i < sec.bytes.size(); i++)
+        for (size_t i = 0; i < sec.bytes.size(); i++)
         {
             if (i > 0 && i % 16 == 0)
                 printf("\n    ");
@@ -85,10 +85,10 @@ void Assembler::dump()
 
 bool Assembler::match_seq(const std::vector<TokenType>& types)
 {
-    if (end - cursor < types.size())
+    if (end < types.size() + cursor)
         return false;
 
-    for (int i = 0; i < types.size(); i++)
+    for (size_t i = 0; i < types.size(); i++)
         if ((cursor + i)->type != types[i])
             return false;
 
@@ -114,7 +114,7 @@ Pattern parse_pattern(const string& pattern)
 
     ret.mnemonic = words[0];
 
-    int i = 1;
+    size_t i = 1;
 
     while (words[i] != ":")
         ret.operands.push_back(words[i++]);
@@ -217,22 +217,17 @@ bool Assembler::match_operand(const string& op, vector<Operand>& operands)
     if (op == "imm8" || op == "imm16" || op == "imm32" || op == "imm64")
         return match_immediate(op_size, operands);
 
-    // else if (op == "rel8" || op == "rel32")
-    // {
+    if (op == "rel8" || op == "rel32")
+        return match_relative(op_size, operands);
 
-    // }
-    // else if (op == "m")
-    // {
+    if (op == "m")
+        return match_memory(operands);
 
-    // }
-    // else if (op == "m128")
-    // {
+    if (op == "m128")
+        return match_prefix_memory(16, operands);
 
-    // }
-    // else if (op == "xmm")
-    // {
-
-    // }
+    if (op == "xmm")
+        return match_simd_register(operands);
 
     return false;
 }
@@ -260,7 +255,69 @@ bool Assembler::match_register(int size, vector<Operand>& operands)
     return true;
 }
 
-bool Assembler::match_memory_no_offset(int size, vector<Operand>& operands)
+bool Assembler::match_simd_register(vector<Operand>& operands)
+{
+    if (cursor->type != SIMD_REGISTER)
+        return false;
+
+    Operand op;
+    op.is_register = true;
+    op.size = 16;
+    op.base_reg = get_simd_register_index(cursor->str);
+
+    operands.push_back(op);
+
+    cursor++;
+
+    return true;
+}
+
+uint64_t get_number(const Token& tok)
+{
+    if (tok.type != NUMERIC)
+        throw runtime_error("get_number called on non-numeric token");
+
+    if (tok.str.size() > 2)
+    {
+        if (tok.str[1] == 'x')
+            return stoi(tok.str.substr(2), nullptr, 16);
+
+        if (tok.str[1] == 'b')
+            return stoi(tok.str.substr(2), nullptr, 2);
+    }
+
+    return stoi(tok.str);
+}
+
+bool Assembler::match_memory_address(vector<Operand>& operands)
+{
+    // [ address ]
+    if (!match_seq({ OPEN_BRACKET, NUMERIC, CLOSE_BRACKET }))
+        return false;
+
+    uint64_t offset = get_number(*(cursor + 1));
+    int offset_size = get_immediate_size(offset);
+
+    if (offset_size > 4)
+        throw runtime_error("only 32-bit addresses are allowed");
+
+    Operand op;
+    op.is_memory = true;
+    op.is_sib = true;
+    op.offset = offset;
+    op.offset_size = 4;
+    op.base_reg = RSP;
+    op.mod = 0;
+    op.sib = 0b00100101;
+
+    operands.push_back(op);
+
+    cursor += 3;
+
+    return true;
+}
+
+bool Assembler::match_memory_no_offset(vector<Operand>& operands)
 {
     // [ base ]
     if (!match_seq({ OPEN_BRACKET, REGISTER, CLOSE_BRACKET }))
@@ -302,24 +359,7 @@ bool Assembler::match_memory_no_offset(int size, vector<Operand>& operands)
     return true;
 }
 
-uint64_t get_number(const Token& tok)
-{
-    if (tok.type != NUMERIC)
-        throw runtime_error("get_number called on non-numeric token");
-
-    if (tok.str.size() > 2)
-    {
-        if (tok.str[1] == 'x')
-            return stoi(tok.str.substr(2), nullptr, 16);
-
-        if (tok.str[1] == 'b')
-            return stoi(tok.str.substr(2), nullptr, 2);
-    }
-
-    return stoi(tok.str);
-}
-
-bool Assembler::match_memory_with_offset(int size, vector<Operand>& operands)
+bool Assembler::match_memory_with_offset(vector<Operand>& operands)
 {
     // [ base +- offset ]
     if (!match_seq({ OPEN_BRACKET, REGISTER, PLUS_MINUS, NUMERIC, CLOSE_BRACKET }))
@@ -359,7 +399,7 @@ bool Assembler::match_memory_with_offset(int size, vector<Operand>& operands)
     return true;
 }
 
-bool Assembler::match_memory_sib_no_offset(int size, vector<Operand>& operands)
+bool Assembler::match_memory_sib_no_offset(vector<Operand>& operands)
 {
     // [ base + index * scale ]
     if (!match_seq({ OPEN_BRACKET, REGISTER, PLUS_MINUS, REGISTER, TIMES, NUMERIC, CLOSE_BRACKET }))
@@ -369,369 +409,214 @@ bool Assembler::match_memory_sib_no_offset(int size, vector<Operand>& operands)
     Token index = *(cursor + 3);
     Token scale = *(cursor + 5);
 
-    // if (match_by_order(tok, sib_no_offset, 7))
-    // {
-    //     token* base_tok = tok->next;
-    //     token* index_tok = base_tok->next->next;
-    //     token* scale_tok = index_tok->next->next;
+    if ((cursor + 2)->str != "+")
+        throw runtime_error("invalid sign in SIB expression");
 
-    //     if (base_tok->next->index != 1)
-    //         return ERROR_INVALID_SIB;
+    if (get_register_size(base.str) != 8 || get_register_size(index.str) != 8)
+        throw runtime_error("register must be 64-bit in SIB expression");
 
-    //     if (base_tok->size != QWORD || index_tok->size != QWORD)
-    //         return ERROR_REG_64;
+    int sc = get_number(scale);
 
-    //     int scale = get_number(scale_tok->string);
+    if (sc != 1 && sc != 2 && sc != 4 && sc != 8)
+        throw runtime_error("invalid scale in SIB expression");
 
-    //     if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
-    //         return ERROR_INVALID_SCALE;
+    Register base_reg = (Register)get_register_index(base.str);
+    Register index_reg = (Register)get_register_index(index.str);
 
-    //     reg base = (reg)base_tok->index;
-    //     reg index = (reg)index_tok->index;
+    if (base_reg == RIP || index_reg == RIP || index_reg == RSP)
+        throw runtime_error("invalid SIB expression");
 
-    //     if (base == RIP || index == RIP)
-    //         return ERROR_INVALID_SIB;
+    Operand op;
+    op.is_memory = true;
+    op.is_sib = true;
+    op.offset = 0;
+    op.offset_size = 0;
+    op.base_reg = RSP;
+    op.mod = 0;
 
-    //     if (index == RSP)
-    //         return ERROR_INVALID_SIB;
+    switch (sc)
+    {
+    case 1:     sc = 0;     break;
+    case 2:     sc = 1;     break;
+    case 4:     sc = 2;     break;
+    case 8:     sc = 3;     break;
+    }
 
-    //     op.is_memory = true;
-    //     op.is_sib = true;
-    //     op.offset = 0;
-    //     op.offset_size = 0;
-    //     op.base_reg = RSP;
-    //     op.mod = 0;
+    if (base_reg == RBP)
+    {
+        op.mod = 1;
+        op.offset_size = 1;
+    }
 
-    //     switch (scale)
-    //     {
-    //     case 1:
-    //         scale = 0;
-    //         break;
-    //     case 2:
-    //         scale = 1;
-    //         break;
-    //     case 4:
-    //         scale = 2;
-    //         break;
-    //     case 8:
-    //         scale = 3;
-    //         break;
-    //     }
+    op.sib = (sc << 6) + ((index_reg & 7) << 3) + (base_reg & 7);
 
-    //     if (base == RBP)
-    //     {
-    //         op.mod = 1;
-    //         op.offset_size = 1;
-    //     }
+    operands.push_back(op);
 
-    //     op.sib = (scale << 6) + ((index & 7) << 3) + (base & 7);
+    cursor += 7;
 
-    //     return 0;
-    // }
+    return true;
 }
 
-bool Assembler::match_memory(int size, vector<Operand>& operands)
+bool Assembler::match_memory_sib_with_offset(vector<Operand>& operands)
 {
-    return match_memory_no_offset(size, operands) || match_memory_with_offset(size, operands);
+    // [ base + index * scale +- offset ]
+    if (!match_seq({ OPEN_BRACKET, REGISTER, PLUS_MINUS, REGISTER, TIMES, NUMERIC, PLUS_MINUS, NUMERIC, CLOSE_BRACKET }))
+        return false;
 
-    // token_type sib_no_offset[] =
-    // {
-    //     // [ base + index * scale ]
-    //     OPEN_SQUARE_BRACKET,
-    //     REGISTER,
-    //     PLUS_MINUS_SIGN,
-    //     REGISTER,
-    //     TIMES_SIGN,
-    //     NUMERIC,
-    //     CLOSED_SQUARE_BRACKET
-    // };
+    Token base = *(cursor + 1);
+    Token index = *(cursor + 3);
+    Token scale = *(cursor + 5);
+    Token sign = *(cursor + 6);
+    Token offset = *(cursor + 7);
 
-    // if (match_by_order(tok, sib_no_offset, 7))
-    // {
-    //     token* base_tok = tok->next;
-    //     token* index_tok = base_tok->next->next;
-    //     token* scale_tok = index_tok->next->next;
+    if ((cursor + 2)->str != "+")
+        throw runtime_error("invalid sign in SIB expression");
 
-    //     if (base_tok->next->index != 1)
-    //         return ERROR_INVALID_SIB;
+    if (get_register_size(base.str) != 8 || get_register_size(index.str) != 8)
+        throw runtime_error("register must be 64-bit in SIB expression");
 
-    //     if (base_tok->size != QWORD || index_tok->size != QWORD)
-    //         return ERROR_REG_64;
+    int sc = get_number(scale);
 
-    //     int scale = get_number(scale_tok->string);
+    if (sc != 1 && sc != 2 && sc != 4 && sc != 8)
+        throw runtime_error("invalid scale in SIB expression");
 
-    //     if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
-    //         return ERROR_INVALID_SCALE;
+    Register base_reg = (Register)get_register_index(base.str);
+    Register index_reg = (Register)get_register_index(index.str);
 
-    //     reg base = (reg)base_tok->index;
-    //     reg index = (reg)index_tok->index;
+    if (base_reg == RIP || index_reg == RIP || index_reg == RSP)
+        throw runtime_error("invalid SIB expression");
 
-    //     if (base == RIP || index == RIP)
-    //         return ERROR_INVALID_SIB;
+    Operand op;
+    op.is_memory = true;
+    op.is_sib = true;
+    op.offset = (int32_t)get_number(offset) * ((sign.str == "+") ? 1 : -1);
+    op.offset_size = get_signed_immediate_size(op.offset) > 1 ? 4 : 1;
+    op.base_reg = RSP;
+    op.mod = 1 + (op.offset_size == 4);
 
-    //     if (index == RSP)
-    //         return ERROR_INVALID_SIB;
+    switch (sc)
+    {
+    case 1:     sc = 0;     break;
+    case 2:     sc = 1;     break;
+    case 4:     sc = 2;     break;
+    case 8:     sc = 3;     break;
+    }
 
-    //     op.is_memory = true;
-    //     op.is_sib = true;
-    //     op.offset = 0;
-    //     op.offset_size = 0;
-    //     op.base_reg = RSP;
-    //     op.mod = 0;
+    op.sib = (sc << 6) + ((index_reg & 7) << 3) + (base_reg & 7);
 
-    //     switch (scale)
-    //     {
-    //     case 1:
-    //         scale = 0;
-    //         break;
-    //     case 2:
-    //         scale = 1;
-    //         break;
-    //     case 4:
-    //         scale = 2;
-    //         break;
-    //     case 8:
-    //         scale = 3;
-    //         break;
-    //     }
+    operands.push_back(op);
 
-    //     if (base == RBP)
-    //     {
-    //         op.mod = 1;
-    //         op.offset_size = 1;
-    //     }
+    cursor += 9;
 
-    //     op.sib = (scale << 6) + ((index & 7) << 3) + (base & 7);
+    return true;
+}
 
-    //     return 0;
-    // }
+bool Assembler::match_memory_sib_no_base_no_offset(vector<Operand>& operands)
+{
+    // [ index * scale ]
+    if (!match_seq({ OPEN_BRACKET, REGISTER, TIMES, NUMERIC, CLOSE_BRACKET }))
+        return false;
 
-    // token_type sib_with_offset[] =
-    // {
-    //     // [ base + index * scale +- offset ]
-    //     OPEN_SQUARE_BRACKET,
-    //     REGISTER,
-    //     PLUS_MINUS_SIGN,
-    //     REGISTER,
-    //     TIMES_SIGN,
-    //     NUMERIC,
-    //     PLUS_MINUS_SIGN,
-    //     NUMERIC,
-    //     CLOSED_SQUARE_BRACKET
-    // };
+    Token index = *(cursor + 1);
+    Token scale = *(cursor + 3);
 
-    // if (match_by_order(tok, sib_with_offset, 9))
-    // {
-    //     token* base_tok = tok->next;
-    //     token* index_tok = base_tok->next->next;
-    //     token* scale_tok = index_tok->next->next;
-    //     token* sign_tok = scale_tok->next;
-    //     token* offset_tok = sign_tok->next;
+    if (get_register_size(index.str) != 8)
+        throw runtime_error("register must be 64-bit in SIB expression");
 
-    //     if (base_tok->next->index != 1)
-    //         return ERROR_INVALID_SIB;
+    int sc = get_number(scale);
 
-    //     if (base_tok->size != QWORD || index_tok->size != QWORD)
-    //         return ERROR_REG_64;
+    if (sc != 1 && sc != 2 && sc != 4 && sc != 8)
+        throw runtime_error("invalid scale in SIB expression");
 
-    //     int scale = get_number(scale_tok->string);
+    Register index_reg = (Register)get_register_index(index.str);
 
-    //     if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
-    //         return ERROR_INVALID_SCALE;
+    if (index_reg == RSP)
+        throw runtime_error("invalid SIB expression");
 
-    //     reg base = (reg)base_tok->index;
-    //     reg index = (reg)index_tok->index;
+    Operand op;
+    op.is_memory = true;
+    op.is_sib = true;
+    op.offset = 0;
+    op.offset_size = 4;
+    op.base_reg = RSP;
+    op.mod = 0;
 
-    //     if (base == RIP || index == RIP)
-    //         return ERROR_INVALID_SIB;
+    switch (sc)
+    {
+    case 1:     sc = 0;     break;
+    case 2:     sc = 1;     break;
+    case 4:     sc = 2;     break;
+    case 8:     sc = 3;     break;
+    }
 
-    //     if (index == RSP)
-    //         return ERROR_INVALID_SIB;
+    op.sib = (sc << 6) + ((sc & 7) << 3) + (RBP & 7);
 
-    //     int32_t offset = (int32_t)get_number(offset_tok->string) * sign_tok->index;
+    operands.push_back(op);
 
-    //     int offset_size = sizeof_signed_immediate(offset);
+    cursor += 5;
 
-    //     if (offset_size == BYTE)
-    //         offset_size = 1;
-    //     else
-    //         offset_size = 4;
+    return true;
+}
 
-    //     op.is_memory = true;
-    //     op.is_sib = true;
-    //     op.offset = offset;
-    //     op.offset_size = offset_size;
-    //     op.base_reg = RSP;
-    //     op.mod = 1 + (offset_size == 4);
+bool Assembler::match_memory_sib_no_base_with_offset(vector<Operand>& operands)
+{
+    // [ index * scale +- offset ]
+    if (!match_seq({ OPEN_BRACKET, REGISTER, TIMES, NUMERIC, PLUS_MINUS, NUMERIC, CLOSE_BRACKET }))
+        return false;
 
-    //     switch (scale)
-    //     {
-    //     case 1:
-    //         scale = 0;
-    //         break;
-    //     case 2:
-    //         scale = 1;
-    //         break;
-    //     case 4:
-    //         scale = 2;
-    //         break;
-    //     case 8:
-    //         scale = 3;
-    //         break;
-    //     }
+    Token index = *(cursor + 1);
+    Token scale = *(cursor + 3);
+    Token sign = *(cursor + 4);
+    Token offset = *(cursor + 5);
 
-    //     op.sib = (scale << 6) + ((index & 7) << 3) + (base & 7);
+    if (get_register_size(index.str) != 8)
+        throw runtime_error("register must be 64-bit in SIB expression");
 
-    //     return 0;
-    // }
+    int sc = get_number(scale);
 
-    // token_type memory_address[] =
-    // {
-    //     // [ address ]
-    //     OPEN_SQUARE_BRACKET,
-    //     NUMERIC,
-    //     CLOSED_SQUARE_BRACKET
-    // };
+    if (sc != 1 && sc != 2 && sc != 4 && sc != 8)
+        throw runtime_error("invalid scale in SIB expression");
 
-    // if (match_by_order(tok, memory_address, 3))
-    // {
-    //     uint64_t offset = get_number(tok->next->string);
+    Register index_reg = (Register)get_register_index(index.str);
 
-    //     int offset_size = sizeof_immediate(offset);
+    if (index_reg == RSP)
+        throw runtime_error("invalid SIB expression");
 
-    //     if (offset_size > DWORD)
-    //         return ERROR_TOO_BIG;
+    Operand op;
+    op.is_memory = true;
+    op.is_sib = true;
+    op.offset = (int32_t)get_number(offset) * ((sign.str == "+") ? 1 : -1);
+    op.offset_size = 4;
+    op.base_reg = RSP;
+    op.mod = 0;
 
-    //     op.is_memory = true;
-    //     op.is_sib = true;
-    //     op.offset = offset;
-    //     op.offset_size = 4;
-    //     op.base_reg = RSP;
-    //     op.mod = 0;
-    //     op.sib = 0b00100101;
+    switch (sc)
+    {
+    case 1:     sc = 0;     break;
+    case 2:     sc = 1;     break;
+    case 4:     sc = 2;     break;
+    case 8:     sc = 3;     break;
+    }
 
-    //     return 0;
-    // }
+    op.sib = (sc << 6) + ((index_reg & 7) << 3) + (RBP & 7);
 
-    // token_type sib_no_base_no_offset[] =
-    // {
-    //     // [ index * scale ]
-    //     OPEN_SQUARE_BRACKET,
-    //     REGISTER,
-    //     TIMES_SIGN,
-    //     NUMERIC,
-    //     CLOSED_SQUARE_BRACKET
-    // };
+    operands.push_back(op);
 
-    // if (match_by_order(tok, sib_no_base_no_offset, 5))
-    // {
-    //     token* index_tok = tok->next;
-    //     token* scale_tok = index_tok->next->next;
+    cursor += 7;
 
-    //     if (index_tok->size != QWORD)
-    //         return ERROR_REG_64;
+    return true;
+}
 
-    //     int scale = get_number(scale_tok->string);
-
-    //     if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
-    //         return ERROR_INVALID_SCALE;
-
-    //     reg index = (reg)index_tok->index;
-
-    //     if (index == RSP)
-    //         return ERROR_INVALID_SIB;
-
-    //     op.is_memory = true;
-    //     op.is_sib = true;
-    //     op.offset = 0;
-    //     op.offset_size = 4;
-    //     op.base_reg = RSP;
-    //     op.mod = 0;
-
-    //     switch (scale)
-    //     {
-    //     case 1:
-    //         scale = 0;
-    //         break;
-    //     case 2:
-    //         scale = 1;
-    //         break;
-    //     case 4:
-    //         scale = 2;
-    //         break;
-    //     case 8:
-    //         scale = 3;
-    //         break;
-    //     }
-
-    //     op.sib = (scale << 6) + ((index & 7) << 3) + (RBP & 7);
-
-    //     return 0;
-    // }
-
-    // token_type sib_no_base_with_offset[] =
-    // {
-    //     // [ index * scale +- offset ]
-    //     OPEN_SQUARE_BRACKET,
-    //     REGISTER,
-    //     TIMES_SIGN,
-    //     NUMERIC,
-    //     PLUS_MINUS_SIGN,
-    //     NUMERIC,
-    //     CLOSED_SQUARE_BRACKET
-    // };
-
-    // if (match_by_order(tok, sib_no_base_with_offset, 7))
-    // {
-    //     token* index_tok = tok->next;
-    //     token* scale_tok = index_tok->next->next;
-    //     token* sign_tok = scale_tok->next;
-    //     token* offset_tok = sign_tok->next;
-
-    //     if (index_tok->size != QWORD)
-    //         return ERROR_REG_64;
-
-    //     int scale = get_number(scale_tok->string);
-
-    //     if (scale != 1 && scale != 2 && scale != 4 && scale != 8)
-    //         return ERROR_INVALID_SCALE;
-
-    //     reg index = (reg)index_tok->index;
-
-    //     if (index == RSP)
-    //         return ERROR_INVALID_SIB;
-
-    //     int32_t offset = (int32_t)get_number(offset_tok->string) * sign_tok->index;
-
-    //     op.is_memory = true;
-    //     op.is_sib = true;
-    //     op.offset = offset;
-    //     op.offset_size = 4;
-    //     op.base_reg = RSP;
-    //     op.mod = 0;
-
-    //     switch (scale)
-    //     {
-    //     case 1:
-    //         scale = 0;
-    //         break;
-    //     case 2:
-    //         scale = 1;
-    //         break;
-    //     case 4:
-    //         scale = 2;
-    //         break;
-    //     case 8:
-    //         scale = 3;
-    //         break;
-    //     }
-
-    //     op.sib = (scale << 6) + ((index & 7) << 3) + (RBP & 7);
-
-    //     return 0;
-    // }
-
-    // return 1;
+bool Assembler::match_memory(vector<Operand>& operands)
+{
+    return
+        match_memory_address(operands) ||
+        match_memory_no_offset(operands) ||
+        match_memory_with_offset(operands) ||
+        match_memory_sib_no_offset(operands) ||
+        match_memory_sib_with_offset(operands) ||
+        match_memory_sib_no_base_no_offset(operands) ||
+        match_memory_sib_no_base_with_offset(operands);
 }
 
 int get_prefix_size(const string& str)
@@ -764,10 +649,69 @@ bool Assembler::match_prefix_memory(int size, vector<Operand>& operands)
 
     cursor++;
 
-    return match_memory(size, operands);
+    return match_memory(operands);
 }
 
 bool Assembler::match_immediate(int size, vector<Operand>& operands)
 {
-    return false;
+    int sign = 1;
+    int next = 0;
+
+    if (cursor->type != NUMERIC)
+    {
+        if (!match_seq({ PLUS_MINUS, NUMERIC }))
+            return false;
+
+        if (cursor->str == "-")
+            sign = -1;
+
+        next = 1;
+    }
+
+    uint64_t value = (int64_t)get_number(*(cursor + next)) * sign;
+
+    int signed_size = get_signed_immediate_size((int64_t)value);
+    int unsigned_size = get_immediate_size(value);
+
+    int compare_size = (signed_size > unsigned_size) ? unsigned_size : signed_size;
+
+    if (compare_size > size)
+        return false;
+
+    Operand op;
+    op.is_immediate = true;
+    op.size = size;
+    op.imm = value;
+
+    operands.push_back(op);
+
+    cursor += 1 + next;
+
+    return true;
+}
+
+bool Assembler::match_relative(int size, vector<Operand>& operands)
+{
+    if (cursor->type != NUMERIC)
+        return false;
+
+    int64_t value = (uint64_t)get_number(*cursor);
+
+    // value -= bytes + instruction_size;
+
+    int signed_size = 4;
+
+    if (size > signed_size)
+        return false;
+
+    Operand op;
+    op.is_immediate = true;
+    op.size = size;
+    op.imm = value;
+
+    operands.push_back(op);
+
+    cursor++;
+
+    return true;
 }

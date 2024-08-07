@@ -67,8 +67,17 @@ int get_register_size(const string& str)
 
 int get_register_index(const string& str)
 {
-    for (int i = 0; i < register_map.size(); i++)
+    for (size_t i = 0; i < register_map.size(); i++)
         if (str == register_map[i])
+            return i;
+
+    return -1;
+}
+
+int get_simd_register_index(const string& str)
+{
+    for (size_t i = 0; i < simd_register_map.size(); i++)
+        if (str == simd_register_map[i])
             return i;
 
     return -1;
@@ -81,11 +90,7 @@ bool is_register(const string& str)
 
 bool is_simd_register(const string& str)
 {
-    for (auto& reg : simd_register_map)
-        if (str == reg)
-            return true;
-
-    return false;
+    return get_simd_register_index(str) != -1;
 }
 
 bool is_size(const string& str)
@@ -102,7 +107,7 @@ const char* digits = "0123456789abcdef";
 bool is_number(const string& str)
 {
     int base = 10;
-    int i = 0;
+    size_t i = 0;
     int j;
 
     if (str[0] == '0')

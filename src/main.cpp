@@ -8,7 +8,11 @@ using namespace std;
 
 int main(int argc, char** argv)
 {
-    bool on_stdin = argc == 1;
+    if (argc != 2)
+    {
+        cerr << "use: << " << argv[0] << " file\n";
+        exit(EXIT_FAILURE);
+    }
 
     ifstream file(argv[1]);
 

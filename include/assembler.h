@@ -75,12 +75,18 @@ struct Assembler
     bool match_operand(const std::string& op, std::vector<Operand>& operands);
 
     bool match_register(int size, std::vector<Operand>& operands);
+    bool match_simd_register(std::vector<Operand>& operands);
 
-    bool match_memory_no_offset(int size, std::vector<Operand>& operands);
-    bool match_memory_with_offset(int size, std::vector<Operand>& operands);
-    bool match_memory_sib_no_offset(int size, std::vector<Operand>& operands);
-    bool match_memory(int size, std::vector<Operand>& operands);
+    bool match_memory_address(std::vector<Operand>& operands);
+    bool match_memory_no_offset(std::vector<Operand>& operands);
+    bool match_memory_with_offset(std::vector<Operand>& operands);
+    bool match_memory_sib_no_offset(std::vector<Operand>& operands);
+    bool match_memory_sib_with_offset(std::vector<Operand>& operands);
+    bool match_memory_sib_no_base_no_offset(std::vector<Operand>& operands);
+    bool match_memory_sib_no_base_with_offset(std::vector<Operand>& operands);
+    bool match_memory(std::vector<Operand>& operands);
     bool match_prefix_memory(int size, std::vector<Operand>& operands);
 
     bool match_immediate(int size, std::vector<Operand>& operands);
+    bool match_relative(int size, std::vector<Operand>& operands);
 };
