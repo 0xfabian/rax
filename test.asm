@@ -1,1 +1,2 @@
-mov rax qword [rsp + 200]
+section .text
+mov eax, 1

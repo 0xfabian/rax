@@ -39,7 +39,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
         {
             try
             {
-                sections.back().bytes.push_back(stoi(cursor->str, nullptr, 16));
+                sections.back().add(cursor->str);
                 cursor++;
             }
             catch (...)
@@ -142,10 +142,26 @@ bool Assembler::match_pattern(const string& pattern)
     cursor++;
 
     for (auto& op : p.operands)
-        if (cursor == end || !match_operand(op, operands))
+    {
+        if (cursor == end)
             return false;
 
-    printf("%s\n", pattern.c_str());
+        if (operands.size() > 0)
+        {
+            if (cursor->type != COMMA)
+                throw runtime_error("expected comma after " + (cursor - 1)->str);
+
+            cursor++;
+        }
+
+        if (!match_operand(op, operands))
+            return false;
+    }
+
+    if (cursor != end)
+        throw runtime_error("junk after " + (cursor - 1)->str);
+
+    generate_bytes(p, operands);
 
     return true;
 }
@@ -714,4 +730,115 @@ bool Assembler::match_relative(int size, vector<Operand>& operands)
     cursor++;
 
     return true;
+}
+
+void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& operands)
+{
+    if (sections.empty())
+        throw runtime_error("instruction must be inside a section");
+
+    auto op = operands.begin();
+
+    for (auto& byte : pattern.bytes)
+    {
+        if (pattern.encoding != "zo" && op == operands.end())
+            throw runtime_error("not enough operands");
+
+        if (byte[0] == '/')
+        {
+            uint8_t low;
+            uint8_t mid;
+            uint8_t mod;
+
+            Operand* mem = nullptr;
+
+            if (byte[1] == 'r')
+            {
+                Operand dest = *op;
+                Operand src = *(op + 1);
+
+                if (src.is_register && dest.is_register)
+                    mod = 3;
+                else
+                {
+                    if (src.is_memory)
+                    {
+                        mem = &src;
+                        mod = src.mod;
+                    }
+                    else
+                    {
+                        mem = &dest;
+                        mod = dest.mod;
+                    }
+                }
+
+                low = dest.base_reg & 7;
+                mid = src.base_reg & 7;
+
+                op += 2;
+            }
+            else    // byte[1] = 0 ... 7 
+            {
+                Operand dest = *op;
+
+                if (dest.is_register)
+                    mod = 3;
+                else
+                {
+                    mem = &dest;
+                    mod = dest.mod;
+                }
+
+                low = dest.base_reg & 7;
+                mid = byte[1] - '0';
+
+                op++;
+            }
+
+            uint8_t modrm;
+
+            if (pattern.encoding[0] == 'r' && pattern.encoding[1] == 'm')
+                modrm = (mod << 6) + (low << 3) + mid;
+            else
+                modrm = (mod << 6) + (mid << 3) + low;
+
+            sections.back().add(modrm);
+
+            if (mem)
+            {
+                if (mem->sib)
+                    sections.back().add(mem->sib);
+
+                sections.back().add(mem->offset, mem->offset_size);
+            }
+        }
+        else if (byte[0] == 'i')
+        {
+            sections.back().add(op->imm, op->size);
+
+            op++;
+        }
+        else if (byte[2] == '+')
+        {
+            uint8_t val = stoi(byte.substr(0, 2), nullptr, 16);
+
+            if (byte[3] == 'r')
+                val += op->base_reg & 7;
+            else if (byte[3] == 'c')
+                val += op->imm;
+
+            op++;
+
+            sections.back().add(val);
+        }
+        else
+            sections.back().add(byte);
+    }
+
+    if (op < operands.end())
+    {
+        printf("dif: %ld\n", operands.end() - op);
+        throw runtime_error("there are more operands (" + to_string(operands.size()) + ") then expected");
+    }
 }

@@ -22,6 +22,18 @@ struct Section
 {
     std::string name;
     std::vector<uint8_t> bytes;
+
+    void add(std::string byte) { bytes.push_back(stoi(byte, nullptr, 16)); }
+    void add(uint8_t byte) { bytes.push_back(byte); }
+
+    void add(uint64_t value, int size)
+    {
+        for (int i = 0; i < size; i++)
+        {
+            add((uint8_t)value);
+            value >>= 8;
+        }
+    }
 };
 
 struct Symbol
@@ -89,4 +101,6 @@ struct Assembler
 
     bool match_immediate(int size, std::vector<Operand>& operands);
     bool match_relative(int size, std::vector<Operand>& operands);
+
+    void generate_bytes(const Pattern& pattern, const std::vector<Operand>& operands);
 };
