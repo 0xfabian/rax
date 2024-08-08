@@ -10,7 +10,7 @@ int main(int argc, char** argv)
 {
     if (argc != 2)
     {
-        cerr << "use: << " << argv[0] << " file\n";
+        cerr << "use: " << argv[0] << " file\n";
         exit(EXIT_FAILURE);
     }
 
@@ -18,7 +18,7 @@ int main(int argc, char** argv)
 
     if (!file.is_open())
     {
-        cerr << "error: could not open file `" << argv[1] << "`\n";
+        cerr << "error: could not open file '" << argv[1] << "'\n";
         exit(EXIT_FAILURE);
     }
 

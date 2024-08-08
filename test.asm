@@ -1,2 +1,2 @@
 section .text
-mov eax, 1
+    movaps xmmword [rsp], xmm0

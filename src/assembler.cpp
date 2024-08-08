@@ -131,10 +131,11 @@ Pattern parse_pattern(const string& pattern)
 
 bool Assembler::match_pattern(const string& pattern)
 {
+    // doesn't handle labels, so no `d` encoded instructions
+    // doesn't handle __
+
     Pattern p = parse_pattern(pattern);
     vector<Operand> operands;
-
-    // doesn't handle __
 
     if (cursor->str != p.mnemonic)
         return false;
