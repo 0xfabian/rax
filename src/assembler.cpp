@@ -769,18 +769,11 @@ bool Assembler::match_relative(int size, vector<Operand>& operands)
     if (cursor->type != NUMERIC)
         return false;
 
-    int64_t value = (uint64_t)get_number(*cursor);
-
-    // value -= bytes + instruction_size;
-
-    int signed_size = 4;
-
-    if (size > signed_size)
-        return false;
+    int32_t value = get_number(*cursor);
 
     Operand op;
     op.is_immediate = true;
-    op.size = size;
+    op.size = 4;
     op.imm = value;
 
     operands.push_back(op);
