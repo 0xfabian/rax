@@ -74,13 +74,19 @@ typedef std::vector<Token>::const_iterator Cursor;
 struct Assembler
 {
     std::vector<Section> sections;
+    Section* current_section;
+
     std::vector<Symbol> symbols;
 
     Cursor cursor;
     Cursor end;
 
+    Assembler();
+
     void parse_tokens(const std::vector<Token>& tokens);
     void dump();
+
+    void add_section(const std::string& name);
 
     bool match_seq(const std::vector<TokenType>& types);
     bool match_pattern(const std::string& pattern);

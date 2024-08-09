@@ -1,2 +1,2 @@
-section .text
-    movaps xmmword [rsp], xmm0
+    db 21
+    mov rax, 1

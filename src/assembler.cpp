@@ -2,6 +2,11 @@
 
 using namespace std;
 
+Assembler::Assembler()
+{
+    add_section(".text");
+}
+
 void Assembler::parse_tokens(const vector<Token>& tokens)
 {
     if (tokens.empty())
@@ -23,7 +28,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
         if (cursor + 1 != end)
             throw runtime_error("junk after section " + cursor->str);
 
-        sections.push_back({ cursor->str, {} });
+        add_section(cursor->str);
     }
     else if (cursor->str == "db")
     {
@@ -39,7 +44,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
         {
             try
             {
-                sections.back().add(cursor->str);
+                current_section->add(cursor->str);
                 cursor++;
             }
             catch (...)
@@ -81,6 +86,19 @@ void Assembler::dump()
         if (&sec != &sections.back())
             printf("\n");
     }
+}
+
+void Assembler::add_section(const string& name)
+{
+    for (auto& sec : sections)
+        if (sec.name == name)
+        {
+            current_section = &sec;
+            return;
+        }
+
+    sections.push_back({ name, {} });
+    current_section = &sections.back();
 }
 
 bool Assembler::match_seq(const std::vector<TokenType>& types)
@@ -804,19 +822,19 @@ void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& op
             else
                 modrm = (mod << 6) + (mid << 3) + low;
 
-            sections.back().add(modrm);
+            current_section->add(modrm);
 
             if (mem)
             {
                 if (mem->sib)
-                    sections.back().add(mem->sib);
+                    current_section->add(mem->sib);
 
-                sections.back().add(mem->offset, mem->offset_size);
+                current_section->add(mem->offset, mem->offset_size);
             }
         }
         else if (byte[0] == 'i')
         {
-            sections.back().add(op->imm, op->size);
+            current_section->add(op->imm, op->size);
 
             op++;
         }
@@ -831,10 +849,10 @@ void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& op
 
             op++;
 
-            sections.back().add(val);
+            current_section->add(val);
         }
         else
-            sections.back().add(byte);
+            current_section->add(byte);
     }
 
     if (op < operands.end())
