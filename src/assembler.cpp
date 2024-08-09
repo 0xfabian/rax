@@ -34,9 +34,6 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
     {
         cursor++;
 
-        if (sections.empty())
-            throw runtime_error("db must be used inside a section");
-
         if (cursor == end)
             throw runtime_error("expected constant after db");
 
@@ -147,31 +144,73 @@ Pattern parse_pattern(const string& pattern)
     return ret;
 }
 
+bool Assembler::match_condition(const string& suffix, vector<Operand>& operands)
+{
+    for (size_t i = 0; i < conditions.size(); i++)
+    {
+        for (auto& c : split(conditions[i]))
+        {
+            if (suffix == c)
+            {
+                Operand op;
+                op.imm = i;
+                operands.push_back(op);
+
+                cursor++;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Assembler::match_mnemonic(const string& mnemonic, vector<Operand>& operands)
+{
+    if (mnemonic.length() > 2 && mnemonic.substr(mnemonic.length() - 2) == "__")
+    {
+        string prefix = mnemonic.substr(0, mnemonic.length() - 2);
+        string suffix = cursor->str.substr(prefix.length());
+
+        if (cursor->str.find(prefix) != 0)
+            return false;
+
+        return match_condition(suffix, operands);
+    }
+
+    if (cursor->str == mnemonic)
+    {
+        cursor++;
+        return true;
+    }
+
+    return false;
+}
+
 bool Assembler::match_pattern(const string& pattern)
 {
-    // doesn't handle labels, so no `d` encoded instructions
-    // doesn't handle __
-
     Pattern p = parse_pattern(pattern);
     vector<Operand> operands;
 
-    if (cursor->str != p.mnemonic)
+    if (!match_mnemonic(p.mnemonic, operands))
         return false;
 
-    cursor++;
+    bool first_operand = true;
 
     for (auto& op : p.operands)
     {
         if (cursor == end)
             return false;
 
-        if (operands.size() > 0)
+        if (!first_operand)
         {
             if (cursor->type != COMMA)
                 throw runtime_error("expected comma after " + (cursor - 1)->str);
 
             cursor++;
         }
+        else
+            first_operand = false;
 
         if (!match_operand(op, operands))
             return false;
@@ -753,9 +792,6 @@ bool Assembler::match_relative(int size, vector<Operand>& operands)
 
 void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& operands)
 {
-    if (sections.empty())
-        throw runtime_error("instruction must be inside a section");
-
     auto op = operands.begin();
 
     for (auto& byte : pattern.bytes)

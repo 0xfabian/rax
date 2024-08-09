@@ -1,2 +1,1 @@
-    db 21
-    mov rax, 1
+jmp 0xabcd

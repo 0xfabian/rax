@@ -89,6 +89,8 @@ struct Assembler
     void add_section(const std::string& name);
 
     bool match_seq(const std::vector<TokenType>& types);
+    bool match_condition(const std::string& suffix, std::vector<Operand>& operands);
+    bool match_mnemonic(const std::string& mnemonic, std::vector<Operand>& operands);
     bool match_pattern(const std::string& pattern);
     bool match_operand(const std::string& op, std::vector<Operand>& operands);
 
