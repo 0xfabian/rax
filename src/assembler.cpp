@@ -7,6 +7,31 @@ Assembler::Assembler()
     add_section(".text");
 }
 
+int Assembler::assemble(const vector<string>& lines)
+{
+    size_t errors = 0;
+
+    for (size_t i = 0; i < lines.size(); i++)
+    {
+        vector<Token> tokens = get_tokens(lines[i]);
+
+        try
+        {
+            parse_tokens(tokens);
+        }
+        catch (const std::exception& e)
+        {
+            errors++;
+            cerr << "\e[91merror:\e[0m " << i + 1 << ": " << e.what() << '\n';
+        }
+    }
+
+    if (!errors)
+        dump();
+
+    return errors;
+}
+
 void Assembler::parse_tokens(const vector<Token>& tokens)
 {
     if (tokens.empty())
@@ -170,6 +195,10 @@ bool Assembler::match_mnemonic(const string& mnemonic, vector<Operand>& operands
     if (mnemonic.length() > 2 && mnemonic.substr(mnemonic.length() - 2) == "__")
     {
         string prefix = mnemonic.substr(0, mnemonic.length() - 2);
+
+        if (cursor->str.length() < prefix.length())
+            return false;
+
         string suffix = cursor->str.substr(prefix.length());
 
         if (cursor->str.find(prefix) != 0)
@@ -766,15 +795,16 @@ bool Assembler::match_immediate(int size, vector<Operand>& operands)
 
 bool Assembler::match_relative(int size, vector<Operand>& operands)
 {
-    if (cursor->type != NUMERIC)
+    if (size != 4)
         return false;
 
-    int32_t value = get_number(*cursor);
+    if (cursor->type != LABEL)
+        return false;
 
     Operand op;
     op.is_immediate = true;
     op.size = 4;
-    op.imm = value;
+    op.imm = 0;
 
     operands.push_back(op);
 

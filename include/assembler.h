@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <tokenizer.h>
 #include <patterns.h>
 
@@ -77,12 +78,14 @@ struct Assembler
     Section* current_section;
 
     std::vector<Symbol> symbols;
+    bool first_pass = true;
 
     Cursor cursor;
     Cursor end;
 
     Assembler();
 
+    int assemble(const std::vector<std::string>& lines);
     void parse_tokens(const std::vector<Token>& tokens);
     void dump();
 
