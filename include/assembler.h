@@ -1,8 +1,10 @@
 #pragma once
 
 #include <iostream>
+#include <fstream>
 #include <tokenizer.h>
 #include <patterns.h>
+#include <elf.h>
 
 enum Register
 {
@@ -37,12 +39,32 @@ struct Section
     }
 };
 
+// section .text    progbits  alloc   exec    nowrite  align=16 
+// section .rodata  progbits  alloc   noexec  nowrite  align=4 
+// section .lrodata progbits  alloc   noexec  nowrite  align=4 
+// section .data    progbits  alloc   noexec  write    align=4 
+// section .ldata   progbits  alloc   noexec  write    align=4 
+// section .bss     nobits    alloc   noexec  write    align=4 
+// section .lbss    nobits    alloc   noexec  write    align=4 
+// section .tdata   progbits  alloc   noexec  write    align=4    tls 
+// section .tbss    nobits    alloc   noexec  write    align=4    tls 
+// section .comment progbits  noalloc noexec  nowrite  align=1 
+// section other    progbits  alloc   noexec  nowrite  align=1
+
+struct Location
+{
+    size_t id;
+    size_t offset;
+};
+
 struct Symbol
 {
     std::string name;
-    bool is_imported;
-    bool is_defined;
-    size_t address;
+    bool is_defined = false;
+    bool is_exported = false;
+    bool is_imported = false;
+    std::vector<Location> locations;
+    size_t address = 0;
 };
 
 struct Pattern
@@ -70,12 +92,50 @@ struct Operand
     int offset_size = 0;
 };
 
+struct StringTable
+{
+    std::vector<std::string> strings;
+
+    int add(const std::string& str)
+    {
+        int ret = 0;
+
+        for (auto& _str : strings)
+        {
+            if (str == _str)
+                return ret;
+
+            ret += _str.size() + 1;
+        }
+
+        strings.push_back(str);
+
+        return ret;
+    }
+
+    std::vector<uint8_t> bytes()
+    {
+        std::vector<uint8_t> ret;
+
+        for (auto& str : strings)
+        {
+            for (auto ch : str)
+                ret.push_back(ch);
+
+            ret.push_back(0);
+        }
+
+        return ret;
+    }
+};
+
 typedef std::vector<Token>::const_iterator Cursor;
 
 struct Assembler
 {
+    std::string filename;
     std::vector<Section> sections;
-    Section* current_section;
+    size_t current_section_id;
 
     std::vector<Symbol> symbols;
     bool first_pass = true;
@@ -83,13 +143,20 @@ struct Assembler
     Cursor cursor;
     Cursor end;
 
-    Assembler();
+    Assembler(const std::string& _filename);
+
+    Section* current_section() { return &sections[current_section_id]; }
 
     int assemble(const std::vector<std::string>& lines);
     void parse_tokens(const std::vector<Token>& tokens);
     void dump();
+    void output();
 
     void add_section(const std::string& name);
+    void add_symbol(const std::string& name);
+    void export_symbol(const std::string& name);
+    void import_symbol(const std::string& name);
+    void add_label(const std::string& name);
 
     bool match_seq(const std::vector<TokenType>& types);
     bool match_condition(const std::string& suffix, std::vector<Operand>& operands);

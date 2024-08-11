@@ -2,8 +2,10 @@
 
 using namespace std;
 
-Assembler::Assembler()
+Assembler::Assembler(const string& _filename)
 {
+    filename = _filename;
+
     add_section(".text");
 }
 
@@ -26,8 +28,28 @@ int Assembler::assemble(const vector<string>& lines)
         }
     }
 
+    for (auto& sym : symbols)
+    {
+        if (sym.is_defined)
+        {
+            cout << "resolving symbol '" << sym.name << "' ...\n";
+            cout << "address: " << sym.address << "\n";
+
+            for (auto& loc : sym.locations)
+                cout << sections[loc.id].name << " at " << loc.offset << "\n";
+        }
+        else if (!sym.is_imported)
+        {
+            errors++;
+            cerr << "\e[91merror:\e[0m " << "symbol '" + sym.name + "' is undefined\n";
+        }
+    }
+
     if (!errors)
+    {
         dump();
+        output();
+    }
 
     return errors;
 }
@@ -37,15 +59,28 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
     if (tokens.empty())
         return;
 
-    cursor = tokens.begin();
+    auto begin = tokens.begin();
     end = tokens.end();
+
+    cursor = begin;
+
+    if (cursor->type == LABEL_DEFINITION)
+    {
+        add_label(cursor->str.substr(0, cursor->str.length() - 1));
+
+        cursor++;
+        begin = cursor;
+
+        if (cursor == end)
+            return;
+    }
 
     if (cursor->str == "section")
     {
         cursor++;
 
         if (cursor == end)
-            throw runtime_error("expected name after section");
+            throw runtime_error("expected section name after section");
 
         if (cursor->type != LABEL)
             throw runtime_error("invalid section name '" + cursor->str + "'");
@@ -54,6 +89,36 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
             throw runtime_error("junk after section " + cursor->str);
 
         add_section(cursor->str);
+    }
+    else if (cursor->str == "export" || cursor->str == "global")
+    {
+        cursor++;
+
+        if (cursor == end)
+            throw runtime_error("expected symbol name after export");
+
+        if (cursor->type != LABEL)
+            throw runtime_error("invalid symbol name '" + cursor->str + "'");
+
+        if (cursor + 1 != end)
+            throw runtime_error("junk after symbol " + cursor->str);
+
+        export_symbol(cursor->str);
+    }
+    else if (cursor->str == "import" || cursor->str == "extern")
+    {
+        cursor++;
+
+        if (cursor == end)
+            throw runtime_error("expected symbol name after import");
+
+        if (cursor->type != LABEL)
+            throw runtime_error("invalid symbol name '" + cursor->str + "'");
+
+        if (cursor + 1 != end)
+            throw runtime_error("junk after symbol " + cursor->str);
+
+        import_symbol(cursor->str);
     }
     else if (cursor->str == "db")
     {
@@ -66,7 +131,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
         {
             try
             {
-                current_section->add(cursor->str);
+                current_section()->add(cursor->str);
                 cursor++;
             }
             catch (...)
@@ -79,7 +144,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
     {
         for (auto& pattern : patterns)
         {
-            cursor = tokens.begin();
+            cursor = begin;
 
             if (match_pattern(pattern))
                 return;
@@ -110,17 +175,441 @@ void Assembler::dump()
     }
 }
 
+void hexdump(vector<uint8_t> bytes)
+{
+    size_t i = 0;
+
+    while (true)
+    {
+        if (i % 16 == 0)
+        {
+            if (i >= bytes.size())
+                break;
+
+            printf("%08lx:  ", i);
+        }
+
+        if (i % 16 == 8)
+            printf(" ");
+
+        if (i < bytes.size())
+            printf("%02x ", bytes[i]);
+        else
+            printf("   ");
+
+        if (i % 16 == 15)
+        {
+            printf(" |");
+
+            for (int j = 0; j < 16; j++)
+            {
+                size_t index = i - (i % 16) + j;
+
+                if (index >= bytes.size())
+                    break;
+
+                if (isprint(bytes[index]))
+                    printf("%c", bytes[index]);
+                else
+                    printf(".");
+            }
+
+            printf("|\n");
+        }
+
+        i++;
+    }
+}
+
+void Assembler::output()
+{
+    // remove all empty sections
+
+    StringTable shstrtab;
+
+    vector<int> section_name_offsets;
+
+    section_name_offsets.push_back(shstrtab.add(""));
+
+    for (auto& sec : sections)
+        section_name_offsets.push_back(shstrtab.add(sec.name));
+
+    section_name_offsets.push_back(shstrtab.add(".shstrtab"));
+    section_name_offsets.push_back(shstrtab.add(".symtab"));
+    section_name_offsets.push_back(shstrtab.add(".strtab"));
+
+    cout << "shstrtab data:\n";
+
+    hexdump(shstrtab.bytes());
+
+    for (size_t i = 0; i < section_name_offsets.size(); i++)
+        cout << i << ": name at " << section_name_offsets[i] << "\n";
+
+    StringTable strtab;
+
+    vector<int> symbol_name_offsets;
+
+    symbol_name_offsets.push_back(strtab.add(""));
+    symbol_name_offsets.push_back(strtab.add(filename));
+
+    for (auto& sec : sections)
+        symbol_name_offsets.push_back(strtab.add(""));
+
+    for (auto& sym : symbols)
+        symbol_name_offsets.push_back(strtab.add(sym.name));
+
+    cout << "strtab data:\n";
+
+    hexdump(strtab.bytes());
+
+    for (size_t i = 0; i < symbol_name_offsets.size(); i++)
+        cout << i << ": name at " << symbol_name_offsets[i] << "\n";
+
+    vector<Elf64_Shdr> shdrs;
+
+    Elf64_Shdr null_shdr;
+    null_shdr.sh_name = section_name_offsets[shdrs.size()];
+    null_shdr.sh_type = SHT_NULL;
+    null_shdr.sh_flags = 0;
+    null_shdr.sh_addr = 0;
+    null_shdr.sh_offset = 0;
+    null_shdr.sh_size = 0;
+    null_shdr.sh_link = 0;
+    null_shdr.sh_info = 0;
+    null_shdr.sh_addralign = 0;
+    null_shdr.sh_entsize = 0;
+
+    shdrs.push_back(null_shdr);
+
+    for (auto& sec : sections)
+    {
+        Elf64_Shdr shdr;
+        shdr.sh_name = section_name_offsets[shdrs.size()];
+
+        shdr.sh_type = sec.name == ".bss" ? SHT_NOBITS : SHT_PROGBITS;
+        shdr.sh_flags = SHF_ALLOC;
+
+        if (sec.name == ".text")
+            shdr.sh_flags |= SHF_EXECINSTR;
+        else
+            shdr.sh_flags |= SHF_WRITE;
+
+        shdr.sh_addr = 0;
+        shdr.sh_offset = 0;
+        shdr.sh_size = sec.bytes.size();
+        shdr.sh_link = 0;
+        shdr.sh_info = 0;
+
+        if (sec.name == ".text")
+            shdr.sh_addralign = 16;
+        else if (sec.name == ".data" || sec.name == ".bss")
+            shdr.sh_addralign = 4;
+        else
+            shdr.sh_addralign = 1;
+
+        shdr.sh_entsize = 0;
+
+        shdrs.push_back(shdr);
+    }
+
+    size_t shstrtab_index = shdrs.size();
+
+    Elf64_Shdr shstrtab_shdr;
+    shstrtab_shdr.sh_name = section_name_offsets[shdrs.size()];
+    shstrtab_shdr.sh_type = SHT_STRTAB;
+    shstrtab_shdr.sh_flags = 0;
+    shstrtab_shdr.sh_addr = 0;
+    shstrtab_shdr.sh_offset = 0;
+    shstrtab_shdr.sh_size = shstrtab.bytes().size();
+    shstrtab_shdr.sh_link = 0;
+    shstrtab_shdr.sh_info = 0;
+    shstrtab_shdr.sh_addralign = 1;
+    shstrtab_shdr.sh_entsize = 0;
+
+    shdrs.push_back(shstrtab_shdr);
+
+    Elf64_Shdr symtab_shdr;
+    symtab_shdr.sh_name = section_name_offsets[shdrs.size()];
+    symtab_shdr.sh_type = SHT_SYMTAB;
+    symtab_shdr.sh_flags = 0;
+    symtab_shdr.sh_addr = 0;
+    symtab_shdr.sh_offset = 0;
+    symtab_shdr.sh_size = symbol_name_offsets.size() * sizeof(Elf64_Sym); // number of symbol * sizeof
+    symtab_shdr.sh_link = shdrs.size() + 1;   // section index of strtab so this index + 1
+    symtab_shdr.sh_info = 3;                  // symbol index of first global symbol
+    symtab_shdr.sh_addralign = 8;
+    symtab_shdr.sh_entsize = sizeof(Elf64_Sym);
+
+    shdrs.push_back(symtab_shdr);
+
+    Elf64_Shdr strtab_shdr;
+    strtab_shdr.sh_name = section_name_offsets[shdrs.size()];
+    strtab_shdr.sh_type = SHT_STRTAB;
+    strtab_shdr.sh_flags = 0;
+    strtab_shdr.sh_addr = 0;
+    strtab_shdr.sh_offset = 0;
+    strtab_shdr.sh_size = strtab.bytes().size();
+    strtab_shdr.sh_link = 0;
+    strtab_shdr.sh_info = 0;
+    strtab_shdr.sh_addralign = 1;
+    strtab_shdr.sh_entsize = 0;
+
+    shdrs.push_back(strtab_shdr);
+
+    vector<Elf64_Sym> syms;
+
+    Elf64_Sym null_sym;
+    null_sym.st_name = symbol_name_offsets[syms.size()];
+    null_sym.st_info = (STB_LOCAL << 4) | STT_NOTYPE;
+    null_sym.st_other = STV_DEFAULT;
+    null_sym.st_shndx = SHN_UNDEF;
+    null_sym.st_value = 0;
+    null_sym.st_size = 0;
+
+    syms.push_back(null_sym);
+
+    Elf64_Sym file_sym;
+    file_sym.st_name = symbol_name_offsets[syms.size()];
+    file_sym.st_info = (STB_LOCAL << 4) | STT_FILE;
+    file_sym.st_other = STV_DEFAULT;
+    file_sym.st_shndx = SHN_ABS;
+    file_sym.st_value = 0;
+    file_sym.st_size = 0;
+
+    syms.push_back(file_sym);
+
+    for (size_t i = 0; i < sections.size(); i++)
+    {
+        Elf64_Sym sym;
+        sym.st_name = symbol_name_offsets[syms.size()];
+        sym.st_info = (STB_LOCAL << 4) | STT_SECTION;
+        sym.st_other = STV_DEFAULT;
+        sym.st_shndx = 1 + i;
+        sym.st_value = 0;
+        sym.st_size = 0;
+
+        syms.push_back(sym);
+    }
+
+    for (auto& _sym : symbols)
+    {
+        Elf64_Sym sym;
+        sym.st_name = symbol_name_offsets[syms.size()];
+        sym.st_info = STT_NOTYPE;
+
+        if (_sym.is_exported)
+            sym.st_info |= STB_GLOBAL << 4;
+        else
+            sym.st_info |= STB_LOCAL << 4;
+
+        sym.st_other = STV_DEFAULT;
+        sym.st_shndx = 1; // section of the symbol
+        sym.st_value = 0;
+        sym.st_size = 0;
+
+        syms.push_back(sym);
+    }
+
+    Elf64_Ehdr ehdr;
+
+    ehdr.e_ident[EI_MAG0] = 0x7F;
+    ehdr.e_ident[EI_MAG1] = 'E';
+    ehdr.e_ident[EI_MAG2] = 'L';
+    ehdr.e_ident[EI_MAG3] = 'F';
+    ehdr.e_ident[EI_CLASS] = 2;           // 64-bit
+    ehdr.e_ident[EI_DATA] = 1;            // little endian
+    ehdr.e_ident[EI_VERSION] = 1;         // Always 1
+    ehdr.e_ident[EI_OSABI] = 0;           // System-V
+    ehdr.e_ident[EI_ABIVERSION] = 0;
+
+    for (int i = 0; i < 7; i++)
+        ehdr.e_ident[EI_PAD + i] = 0;
+
+    ehdr.e_type = ET_REL;
+    ehdr.e_machine = EM_X86_64;
+    ehdr.e_version = 1;                   // Always 1
+    ehdr.e_entry = 0;                     // No entry
+    ehdr.e_phoff = 0;                     // No program headers
+    ehdr.e_shoff = sizeof(Elf64_Ehdr);
+    ehdr.e_flags = 0;
+    ehdr.e_phentsize = 0;
+    ehdr.e_phnum = 0;
+    ehdr.e_shentsize = sizeof(Elf64_Shdr);
+    ehdr.e_shnum = shdrs.size();                     // more null entry + all sections + .shstrtab + .symtab + .strtab + all rela
+    ehdr.e_shstrndx = shstrtab_index;                // index of .shstrtab so 1 + sections.size()
+
+    size_t dot = filename.rfind(".");
+    string outname = ((dot == string::npos) ? filename : filename.substr(0, dot)) + ".o";
+
+    size_t offset = 0;
+    // no alignment
+
+    offset += sizeof(ehdr);
+
+    for (auto& shdr : shdrs)
+    {
+        offset += sizeof(shdr);
+    }
+
+    for (size_t i = 1; i < shdrs.size(); i++)
+    {
+        if ((i - 1) < sections.size())  // real sections
+        {
+            cout << "shdr data " << i << "done\n";
+        }
+        else
+        {
+            int index = (i - 1) - sections.size();
+
+            if (index == 0)
+            {
+                cout << "shstrtab done\n";
+            }
+            else if (index == 1)
+            {
+                cout << "symtab done\n";
+            }
+            else if (index == 2)
+            {
+                cout << "strtab done\n";
+            }
+        }
+
+        shdrs[i].sh_offset = offset;
+        offset += shdrs[i].sh_size;
+    }
+
+    ofstream out(outname);
+
+    out.write((const char*)&ehdr, sizeof(ehdr));
+
+    for (auto& shdr : shdrs)
+    {
+        out.write((const char*)&shdr, sizeof(shdr));
+    }
+
+    for (size_t i = 1; i < shdrs.size(); i++)
+    {
+        if ((i - 1) < sections.size())  // real sections
+        {
+            out.write((const char*)sections[i - 1].bytes.data(), shdrs[i].sh_size);
+        }
+        else
+        {
+            int index = (i - 1) - sections.size();
+
+            if (index == 0)
+            {
+                out.write((const char*)shstrtab.bytes().data(), shdrs[i].sh_size);
+            }
+            else if (index == 1)
+            {
+                for (auto& _sym : syms)
+                    out.write((const char*)&_sym, sizeof(_sym));
+            }
+            else if (index == 2)
+            {
+                out.write((const char*)strtab.bytes().data(), shdrs[i].sh_size);
+            }
+        }
+    }
+
+    out.close();
+}
+
 void Assembler::add_section(const string& name)
 {
-    for (auto& sec : sections)
-        if (sec.name == name)
+    for (size_t i = 0; i < sections.size(); i++)
+        if (sections[i].name == name)
         {
-            current_section = &sec;
+            current_section_id = i;
             return;
         }
 
     sections.push_back({ name, {} });
-    current_section = &sections.back();
+    current_section_id = sections.size() - 1;
+}
+
+void Assembler::add_symbol(const string& name)
+{
+    Location loc = { current_section_id, current_section()->bytes.size() };
+
+    for (auto& sym : symbols)
+        if (sym.name == name)
+        {
+            sym.locations.push_back(loc);
+            return;
+        }
+
+    Symbol sym;
+    sym.name = name;
+    sym.locations = { loc };
+
+    symbols.push_back(sym);
+}
+
+void Assembler::export_symbol(const std::string& name)
+{
+    for (auto& sym : symbols)
+        if (sym.name == name)
+        {
+            if (sym.is_imported)
+                throw runtime_error("can't export imported symbol");
+
+            sym.is_exported = true;
+        }
+
+    Symbol sym;
+    sym.name = name;
+    sym.is_exported = true;
+
+    symbols.push_back(sym);
+}
+
+void Assembler::import_symbol(const std::string& name)
+{
+    for (auto& sym : symbols)
+        if (sym.name == name)
+        {
+            if (sym.is_defined)
+                throw runtime_error("can't import an already defined symbol");
+
+            if (sym.is_exported)
+                throw runtime_error("can't import exported symbol");
+
+            sym.is_exported = true;
+        }
+
+    Symbol sym;
+    sym.name = name;
+    sym.is_imported = true;
+
+    symbols.push_back(sym);
+}
+
+void Assembler::add_label(const string& name)
+{
+    for (auto& sym : symbols)
+        if (sym.name == name)
+        {
+            if (sym.is_defined)
+                throw runtime_error("the symbol '" + name + "' is already defined");
+
+            if (sym.is_imported)
+                throw runtime_error("can't define imported symbol");
+
+            sym.is_defined = true;
+            sym.address = current_section()->bytes.size();
+
+            return;
+        }
+
+    Symbol sym;
+    sym.name = name;
+    sym.is_defined = true;
+    sym.address = current_section()->bytes.size();
+
+    symbols.push_back(sym);
 }
 
 bool Assembler::match_seq(const std::vector<TokenType>& types)
@@ -394,15 +883,23 @@ uint64_t get_number(const Token& tok)
 
 bool Assembler::match_memory_address(vector<Operand>& operands)
 {
+    uint64_t offset = 0;
+    int offset_size = 4;
+
     // [ address ]
-    if (!match_seq({ OPEN_BRACKET, NUMERIC, CLOSE_BRACKET }))
-        return false;
+    if (!match_seq({ OPEN_BRACKET, LABEL, CLOSE_BRACKET }))
+    {
+        if (!match_seq({ OPEN_BRACKET, NUMERIC, CLOSE_BRACKET }))
+            return false;
 
-    uint64_t offset = get_number(*(cursor + 1));
-    int offset_size = get_immediate_size(offset);
+        offset = get_number(*(cursor + 1));
+        offset_size = get_immediate_size(offset);
 
-    if (offset_size > 4)
-        throw runtime_error("only 32-bit addresses are allowed");
+        if (offset_size > 4)
+            throw runtime_error("only 32-bit addresses are allowed");
+    }
+    else
+        add_symbol((cursor + 1)->str);
 
     Operand op;
     op.is_memory = true;
@@ -801,6 +1298,8 @@ bool Assembler::match_relative(int size, vector<Operand>& operands)
     if (cursor->type != LABEL)
         return false;
 
+    add_symbol(cursor->str);
+
     Operand op;
     op.is_immediate = true;
     op.size = 4;
@@ -881,19 +1380,19 @@ void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& op
             else
                 modrm = (mod << 6) + (mid << 3) + low;
 
-            current_section->add(modrm);
+            current_section()->add(modrm);
 
             if (mem)
             {
                 if (mem->sib)
-                    current_section->add(mem->sib);
+                    current_section()->add(mem->sib);
 
-                current_section->add(mem->offset, mem->offset_size);
+                current_section()->add(mem->offset, mem->offset_size);
             }
         }
         else if (byte[0] == 'i')
         {
-            current_section->add(op->imm, op->size);
+            current_section()->add(op->imm, op->size);
 
             op++;
         }
@@ -908,10 +1407,10 @@ void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& op
 
             op++;
 
-            current_section->add(val);
+            current_section()->add(val);
         }
         else
-            current_section->add(byte);
+            current_section()->add(byte);
     }
 
     if (op < operands.end())

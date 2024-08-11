@@ -33,7 +33,7 @@ int main(int argc, char** argv)
 
     file.close();
 
-    Assembler as;
+    Assembler as(argv[1]);
 
     if (as.assemble(lines) != 0)
         return 1;
