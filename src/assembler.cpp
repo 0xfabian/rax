@@ -61,6 +61,35 @@ int Assembler::assemble(const vector<string>& lines)
     if (!errors)
     {
         remove_empty_sections();
+
+        for (auto& sec : sections)
+        {
+            for (auto& rel : sec->rels)
+            {
+                if (!rel.sym->is_imported) // so is a defined symbol
+                {
+                    // need to swap the symbol definition to the section plus its offset
+
+                    rel.addend += rel.sym->offset;
+                    rel.sec = rel.sym->section;
+                    rel.sym = nullptr;
+                }
+            }
+        }
+
+        for (auto& sec : sections)
+        {
+            if (sec->rels.empty())
+                continue;
+
+            cout << ".rela" << sec->name << "\n";
+
+            for (auto& rel : sec->rels)
+                cout << "offset = " << rel.offset << "    sym = " << ((rel.sym) ? rel.sym->name : rel.sec->name) << "   type = " << rel.type << "   addend = " << rel.addend << "\n";
+
+            cout << "\n";
+        }
+
         dump();
         output();
     }
@@ -280,6 +309,7 @@ void Assembler::output()
 
     vector<Elf64_Shdr> shdrs;
     vector<Elf64_Sym> syms;
+    vector<vector<Elf64_Rela>> all_rels;
 
     StringTable shstrtab;
     StringTable strtab;
@@ -445,6 +475,72 @@ void Assembler::output()
     shdrs[symtab_index].sh_info = global_index;
     shdrs[symtab_index].sh_size = syms.size() * sizeof(Elf64_Sym);
 
+    for (size_t i = 0; i < sections.size(); i++)
+    {
+        if (sections[i]->rels.empty())
+            continue;
+
+        Elf64_Shdr shdr;
+        shdr.sh_name = shstrtab.index_of(".rela" + sections[i]->name);
+
+        shdr.sh_type = SHT_RELA;
+        shdr.sh_flags = 0;
+
+        shdr.sh_addr = 0;
+        shdr.sh_offset = 0;
+        shdr.sh_size = sections[i]->rels.size() * sizeof(Elf64_Rela);
+        shdr.sh_link = symtab_index;
+        shdr.sh_info = 1 + i;   // 1 from first null section
+        shdr.sh_addralign = 8;
+        shdr.sh_entsize = sizeof(Elf64_Rela);
+
+        shdrs.push_back(shdr);
+
+        vector<Elf64_Rela> rels;
+
+        for (auto& rel : sections[i]->rels)
+        {
+            Elf64_Rela rela;
+
+            rela.r_offset = rel.offset;
+            rela.r_addend = rel.addend;
+
+            if (rel.type == 1)
+                rela.r_info = R_X86_64_PC32;
+            else
+                rela.r_info = R_X86_64_32S;
+
+            size_t index;
+
+            if (rel.sym == nullptr)
+            {
+                size_t si;
+
+                for (si = 0; si < sections.size(); si++)
+                    if (sections[si] == rel.sec)
+                        break;
+
+                si += 1; // from first entry;
+
+                for (index = 0; index < syms.size(); index++)
+                    if ((syms[index].st_info & 0x0f) == STT_SECTION && syms[index].st_shndx == si)
+                        break;
+            }
+            else
+            {
+                for (index = 0; index < syms.size(); index++)
+                    if (syms[index].st_name == (unsigned int)strtab.index_of(rel.sym->name))
+                        break;
+            }
+
+            rela.r_info |= index << 32;
+
+            rels.push_back(rela);
+        }
+
+        all_rels.push_back(rels);
+    }
+
     shdrs[shstrtab_index].sh_size = shstrtab.bytes().size();
     shdrs[strtab_index].sh_size = strtab.bytes().size();
 
@@ -522,6 +618,8 @@ void Assembler::output()
             }
             else if (index == 2)
                 out.write((const char*)strtab.bytes().data(), shdrs[i].sh_size);
+            else
+                out.write((const char*)all_rels[index - 3].data(), shdrs[i].sh_size);
         }
     }
 
@@ -545,16 +643,18 @@ void Assembler::add_section(const string& name, const SectionAttributes& attr)
     sections.push_back(sec);
 }
 
-void Assembler::add_symbol(const string& name)
+Symbol* Assembler::add_symbol(const string& name)
 {
     for (auto& sym : symbols)
         if (sym->name == name)
-            return;
+            return sym;
 
     Symbol* sym = new Symbol();
     sym->name = name;
 
     symbols.push_back(sym);
+
+    return sym;
 }
 
 void Assembler::export_symbol(const std::string& name)
@@ -871,6 +971,7 @@ bool Assembler::match_memory_address(vector<Operand>& operands)
 {
     uint64_t offset = 0;
     int offset_size = 4;
+    Symbol* sym = nullptr;
 
     // [ address ]
     if (!match_seq({ OPEN_BRACKET, LABEL, CLOSE_BRACKET }))
@@ -885,7 +986,7 @@ bool Assembler::match_memory_address(vector<Operand>& operands)
             throw runtime_error("only 32-bit addresses are allowed");
     }
     else
-        add_symbol((cursor + 1)->str);
+        sym = add_symbol((cursor + 1)->str);
 
     Operand op;
     op.is_memory = true;
@@ -895,6 +996,12 @@ bool Assembler::match_memory_address(vector<Operand>& operands)
     op.base_reg = RSP;
     op.mod = 0;
     op.sib = 0b00100101;
+
+    if (sym)
+    {
+        op.is_symbol = true;
+        op.sym = sym;
+    }
 
     operands.push_back(op);
 
@@ -1284,12 +1391,15 @@ bool Assembler::match_relative(int size, vector<Operand>& operands)
     if (cursor->type != LABEL)
         return false;
 
-    add_symbol(cursor->str);
+    Symbol* sym = add_symbol(cursor->str);
 
     Operand op;
     op.is_immediate = true;
     op.size = 4;
     op.imm = 0;
+
+    op.is_symbol = true;
+    op.sym = sym;
 
     operands.push_back(op);
 
@@ -1300,6 +1410,8 @@ bool Assembler::match_relative(int size, vector<Operand>& operands)
 
 void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& operands)
 {
+    // size_t sz = current_section->bytes.size();
+
     auto op = operands.begin();
 
     for (auto& byte : pattern.bytes)
@@ -1373,11 +1485,33 @@ void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& op
                 if (mem->sib)
                     current_section->add(mem->sib);
 
+                if (mem->is_symbol)
+                {
+                    Relocation rel;
+                    rel.offset = current_section->bytes.size();
+                    rel.sym = mem->sym;
+                    rel.type = 2;
+                    rel.addend = 0;
+
+                    current_section->rels.push_back(rel);
+                }
+
                 current_section->add(mem->offset, mem->offset_size);
             }
         }
         else if (byte[0] == 'i')
         {
+            if (op->is_symbol)
+            {
+                Relocation rel;
+                rel.offset = current_section->bytes.size();
+                rel.sym = op->sym;
+                rel.type = 1;
+                rel.addend = -4;
+
+                current_section->rels.push_back(rel);
+            }
+
             current_section->add(op->imm, op->size);
 
             op++;

@@ -23,9 +23,16 @@ enum SIMDRegister
     XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
 };
 
+struct Symbol;
+struct Section;
+
 struct Relocation
 {
-
+    uint64_t offset;
+    Symbol* sym;
+    Section* sec;
+    int type;
+    int64_t addend;
 };
 
 struct SectionAttributes
@@ -82,6 +89,7 @@ struct Operand
     bool is_register = false;   // use base_reg and size   
     bool is_memory = false;     // use base_reg, size and offset
     bool is_sib = false;        // use base_reg, index_reg, scale, size and offset
+    bool is_symbol = false;
 
     int size = 0;
     uint64_t imm = 0;
@@ -90,6 +98,7 @@ struct Operand
     uint8_t sib = 0;
     uint32_t offset = 0;
     int offset_size = 0;
+    Symbol* sym;
 };
 
 struct StringTable
@@ -152,7 +161,7 @@ struct Assembler
     void output();
 
     void add_section(const std::string& name, const SectionAttributes& attr = { true, true, false, false, 1 });
-    void add_symbol(const std::string& name);
+    Symbol* add_symbol(const std::string& name);
     void export_symbol(const std::string& name);
     void import_symbol(const std::string& name);
     void add_label(const std::string& name);
