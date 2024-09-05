@@ -11,11 +11,14 @@ main:
 lbl:
     jmp lbl
     mov rax, 60 ; exit
-    mov rdi, 0
+    mov rdi, 2
     syscall
 
 section .data
     null:
-    db 00 00 00 00
+    db 0x00, 0x00, 0x00, 0x00
     msg2:
-    db 68 65 6c 6c 6f 0a
+    db 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x0a, 0, 0, 0
+
+section .bss
+    resb 4

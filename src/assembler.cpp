@@ -2,17 +2,32 @@
 
 using namespace std;
 
+uint64_t get_number(const Token& tok)
+{
+    if (tok.type != NUMERIC)
+        throw runtime_error("get_number called on non-numeric token");
+
+    if (tok.str.size() > 2)
+    {
+        if (tok.str[1] == 'x')
+            return stoi(tok.str.substr(2), nullptr, 16);
+
+        if (tok.str[1] == 'b')
+            return stoi(tok.str.substr(2), nullptr, 2);
+    }
+
+    return stoi(tok.str);
+}
+
 Assembler::Assembler(const string& _filename)
 {
     filename = _filename;
 
-    add_section(".text", { true, true, true, false, 16 });
-    add_section(".rodata", { true, true, false, false, 4 });
     add_section(".data", { true, true, false, true, 4 });
     add_section(".bss", { false, true, false, true, 4 });
     add_section(".comment", { true, false, false, false, 1 });
-
-    current_section_id = 0;
+    add_section(".rodata", { true, true, false, false, 4 });
+    add_section(".text", { true, true, true, false, 16 });
 }
 
 int Assembler::assemble(const vector<string>& lines)
@@ -128,6 +143,12 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
 
         while (cursor != end)
         {
+            if (cursor->type == COMMA)
+            {
+                cursor++;
+                continue;
+            }
+
             try
             {
                 current_section()->add(cursor->str);
@@ -138,6 +159,21 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
                 throw runtime_error("unable to parse constant '" + cursor->str + "'");
             }
         }
+    }
+    else if (cursor->str == "resb")
+    {
+        cursor++;
+
+        if (cursor == end)
+            throw runtime_error("expected constant after resb");
+
+        if (cursor->type != NUMERIC)
+            throw runtime_error("unable to parse constant '" + cursor->str + "'");
+
+        uint64_t count = get_number(*cursor);
+
+        for (uint64_t i = 0; i < count; i++)
+            current_section()->add(0);
     }
     else
     {
@@ -214,23 +250,44 @@ void Assembler::dump()
     }
 }
 
+string get_output_name(const string& filename)
+{
+    size_t dot = filename.rfind(".");
+
+    if (dot != string::npos)
+        return filename.substr(0, dot) + ".o";
+
+    return filename + ".o";
+}
+
+void zero_fill(ofstream& out, size_t offset)
+{
+    streampos pos = out.tellp();
+
+    if (offset > (size_t)pos)
+    {
+        size_t padding = offset - pos;
+        vector<char> zeros(padding, 0);
+        out.write(zeros.data(), zeros.size());
+    }
+}
+
 void Assembler::output()
 {
-    StringTable shstrtab;
+    size_t shstrtab_index = 1 + sections.size();
+    size_t symtab_index = shstrtab_index + 1;
+    size_t strtab_index = symtab_index + 1;
 
     vector<Elf64_Shdr> shdrs;
+    vector<Elf64_Sym> syms;
+
+    StringTable shstrtab;
+    StringTable strtab;
 
     Elf64_Shdr null_shdr;
+    memset(&null_shdr, 0, sizeof(Elf64_Shdr));
+
     null_shdr.sh_name = shstrtab.index_of("");
-    null_shdr.sh_type = SHT_NULL;
-    null_shdr.sh_flags = 0;
-    null_shdr.sh_addr = 0;
-    null_shdr.sh_offset = 0;
-    null_shdr.sh_size = 0;
-    null_shdr.sh_link = 0;
-    null_shdr.sh_info = 0;
-    null_shdr.sh_addralign = 0;
-    null_shdr.sh_entsize = 0;
 
     shdrs.push_back(null_shdr);
 
@@ -262,7 +319,6 @@ void Assembler::output()
         shdrs.push_back(shdr);
     }
 
-    size_t shstrtab_index = shdrs.size();
     Elf64_Shdr shstrtab_shdr;
     shstrtab_shdr.sh_name = shstrtab.index_of(".shstrtab");
     shstrtab_shdr.sh_type = SHT_STRTAB;
@@ -277,7 +333,6 @@ void Assembler::output()
 
     shdrs.push_back(shstrtab_shdr);
 
-    size_t symtab_index = shdrs.size();
     Elf64_Shdr symtab_shdr;
     symtab_shdr.sh_name = shstrtab.index_of(".symtab");
     symtab_shdr.sh_type = SHT_SYMTAB;
@@ -285,14 +340,13 @@ void Assembler::output()
     symtab_shdr.sh_addr = 0;
     symtab_shdr.sh_offset = 0;
     symtab_shdr.sh_size = 0;                  // fill in later
-    symtab_shdr.sh_link = shdrs.size() + 1;   // section index of strtab so this index + 1
+    symtab_shdr.sh_link = strtab_index;
     symtab_shdr.sh_info = 0;                  // fill in later
     symtab_shdr.sh_addralign = 8;
     symtab_shdr.sh_entsize = sizeof(Elf64_Sym);
 
     shdrs.push_back(symtab_shdr);
 
-    size_t strtab_index = shdrs.size();
     Elf64_Shdr strtab_shdr;
     strtab_shdr.sh_name = shstrtab.index_of(".strtab");
     strtab_shdr.sh_type = SHT_STRTAB;
@@ -310,10 +364,6 @@ void Assembler::output()
     cout << ".shstrtab\n";
     hexdump(shstrtab.bytes());
     cout << "\n";
-
-    StringTable strtab;
-
-    vector<Elf64_Sym> syms;
 
     Elf64_Sym null_sym;
     null_sym.st_name = strtab.index_of("");
@@ -341,7 +391,7 @@ void Assembler::output()
         sym.st_name = strtab.index_of("");
         sym.st_info = (STB_LOCAL << 4) | STT_SECTION;
         sym.st_other = STV_DEFAULT;
-        sym.st_shndx = 1 + i; // 1 from the first null entry
+        sym.st_shndx = 1 + i;               // 1 from the first null entry
         sym.st_value = 0;
         sym.st_size = 0;
 
@@ -366,7 +416,7 @@ void Assembler::output()
         else
             sym.st_shndx = 1; // section of symbol but some sections get removed so ...
 
-        sym.st_value = 0;
+        sym.st_value = _sym.is_defined ? _sym.offset : 0;
         sym.st_size = 0;
 
         syms.push_back(sym);
@@ -376,10 +426,7 @@ void Assembler::output()
     hexdump(strtab.bytes());
     cout << "\n";
 
-    sort(syms.begin(), syms.end(), [](const Elf64_Sym& a, const Elf64_Sym& b)
-        {
-            return (a.st_info >> 4) < (b.st_info >> 4);
-        });
+    sort(syms.begin(), syms.end(), [](const Elf64_Sym& a, const Elf64_Sym& b) { return (a.st_info >> 4) < (b.st_info >> 4); });
 
     size_t global_index;
 
@@ -394,6 +441,7 @@ void Assembler::output()
     shdrs[strtab_index].sh_size = strtab.bytes().size();
 
     Elf64_Ehdr ehdr;
+    memset(&ehdr, 0, sizeof(Elf64_Ehdr));
 
     ehdr.e_ident[EI_MAG0] = 0x7F;
     ehdr.e_ident[EI_MAG1] = 'E';
@@ -404,10 +452,6 @@ void Assembler::output()
     ehdr.e_ident[EI_VERSION] = 1;         // Always 1
     ehdr.e_ident[EI_OSABI] = 0;           // System-V
     ehdr.e_ident[EI_ABIVERSION] = 0;
-
-    for (int i = 0; i < 7; i++)
-        ehdr.e_ident[EI_PAD + i] = 0;
-
     ehdr.e_type = ET_REL;
     ehdr.e_machine = EM_X86_64;
     ehdr.e_version = 1;                   // Always 1
@@ -419,82 +463,57 @@ void Assembler::output()
     ehdr.e_phentsize = 0;
     ehdr.e_phnum = 0;
     ehdr.e_shentsize = sizeof(Elf64_Shdr);
-    ehdr.e_shnum = shdrs.size();                     // more null entry + all sections + .shstrtab + .symtab + .strtab + all rela
-    ehdr.e_shstrndx = shstrtab_index;                // index of .shstrtab so 1 + sections.size()
+    ehdr.e_shnum = shdrs.size();
+    ehdr.e_shstrndx = shstrtab_index;
 
-    size_t dot = filename.rfind(".");
-    string outname = ((dot == string::npos) ? filename : filename.substr(0, dot)) + ".o";
-
-    size_t offset = 0;
-    // no alignment
-
-    offset += sizeof(ehdr);
+    size_t offset = ehdr.e_ehsize + ehdr.e_shnum * ehdr.e_shentsize;
 
     for (auto& shdr : shdrs)
     {
-        offset += sizeof(shdr);
+        if (shdr.sh_type == SHT_NOBITS)
+            continue;
+
+        size_t align = shdr.sh_addralign;
+
+        if (align == 0)
+            align = 1;
+
+        offset = (offset + align - 1) & ~(align - 1);
+
+        shdr.sh_offset = offset;
+
+        offset += shdr.sh_size;
     }
 
-    for (size_t i = 1; i < shdrs.size(); i++)
-    {
-        if ((i - 1) < sections.size())  // real sections
-        {
-            cout << "shdr " << i << " done\n";
-        }
-        else
-        {
-            int index = (i - 1) - sections.size();
-
-            if (index == 0)
-            {
-                cout << "shstrtab done\n";
-            }
-            else if (index == 1)
-            {
-                cout << "symtab done\n";
-            }
-            else if (index == 2)
-            {
-                cout << "strtab done\n";
-            }
-        }
-
-        shdrs[i].sh_offset = offset;
-        offset += shdrs[i].sh_size;
-    }
-
-    ofstream out(outname);
+    ofstream out(get_output_name(filename), ios::binary);
 
     out.write((const char*)&ehdr, sizeof(ehdr));
 
     for (auto& shdr : shdrs)
-    {
         out.write((const char*)&shdr, sizeof(shdr));
-    }
 
     for (size_t i = 1; i < shdrs.size(); i++)
     {
+        if (shdrs[i].sh_type == SHT_NOBITS)
+            continue;
+
+        zero_fill(out, shdrs[i].sh_offset);
+
         if ((i - 1) < sections.size())  // real sections
-        {
             out.write((const char*)sections[i - 1].bytes.data(), shdrs[i].sh_size);
-        }
         else
         {
             int index = (i - 1) - sections.size();
 
             if (index == 0)
-            {
                 out.write((const char*)shstrtab.bytes().data(), shdrs[i].sh_size);
-            }
             else if (index == 1)
             {
                 for (auto& _sym : syms)
                     out.write((const char*)&_sym, sizeof(_sym));
             }
             else if (index == 2)
-            {
                 out.write((const char*)strtab.bytes().data(), shdrs[i].sh_size);
-            }
         }
     }
 
@@ -834,23 +853,6 @@ bool Assembler::match_simd_register(vector<Operand>& operands)
     cursor++;
 
     return true;
-}
-
-uint64_t get_number(const Token& tok)
-{
-    if (tok.type != NUMERIC)
-        throw runtime_error("get_number called on non-numeric token");
-
-    if (tok.str.size() > 2)
-    {
-        if (tok.str[1] == 'x')
-            return stoi(tok.str.substr(2), nullptr, 16);
-
-        if (tok.str[1] == 'b')
-            return stoi(tok.str.substr(2), nullptr, 2);
-    }
-
-    return stoi(tok.str);
 }
 
 bool Assembler::match_memory_address(vector<Operand>& operands)
