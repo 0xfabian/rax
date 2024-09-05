@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <algorithm>
 #include <fstream>
 #include <tokenizer.h>
 #include <patterns.h>
@@ -21,10 +22,26 @@ enum SIMDRegister
     XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15
 };
 
+struct Relocation
+{
+
+};
+
+struct SectionAttributes
+{
+    bool progbits;
+    bool alloc;
+    bool exec;
+    bool write;
+    uint64_t align;
+};
+
 struct Section
 {
     std::string name;
+    SectionAttributes attr;
     std::vector<uint8_t> bytes;
+    std::vector<Relocation> rels;
 
     void add(std::string byte) { bytes.push_back(stoi(byte, nullptr, 16)); }
     void add(uint8_t byte) { bytes.push_back(byte); }
@@ -39,32 +56,14 @@ struct Section
     }
 };
 
-// section .text    progbits  alloc   exec    nowrite  align=16 
-// section .rodata  progbits  alloc   noexec  nowrite  align=4 
-// section .lrodata progbits  alloc   noexec  nowrite  align=4 
-// section .data    progbits  alloc   noexec  write    align=4 
-// section .ldata   progbits  alloc   noexec  write    align=4 
-// section .bss     nobits    alloc   noexec  write    align=4 
-// section .lbss    nobits    alloc   noexec  write    align=4 
-// section .tdata   progbits  alloc   noexec  write    align=4    tls 
-// section .tbss    nobits    alloc   noexec  write    align=4    tls 
-// section .comment progbits  noalloc noexec  nowrite  align=1 
-// section other    progbits  alloc   noexec  nowrite  align=1
-
-struct Location
-{
-    size_t id;
-    size_t offset;
-};
-
 struct Symbol
 {
     std::string name;
+    size_t section_id;
+    size_t offset;
     bool is_defined = false;
     bool is_exported = false;
     bool is_imported = false;
-    std::vector<Location> locations;
-    size_t address = 0;
 };
 
 struct Pattern
@@ -152,7 +151,7 @@ struct Assembler
     void dump();
     void output();
 
-    void add_section(const std::string& name);
+    void add_section(const std::string& name, const SectionAttributes& attr = { true, true, false, false, 1 });
     void add_symbol(const std::string& name);
     void export_symbol(const std::string& name);
     void import_symbol(const std::string& name);

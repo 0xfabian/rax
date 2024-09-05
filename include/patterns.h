@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 
-extern std::vector<std::string> conditions;
+extern std::unordered_map<std::string, int> conditions;
 extern std::vector<std::string> patterns;
