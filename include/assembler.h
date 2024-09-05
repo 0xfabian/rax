@@ -95,13 +95,13 @@ struct StringTable
 {
     std::vector<std::string> strings;
 
-    int add(const std::string& str)
+    int index_of(const std::string& str)
     {
         int ret = 0;
 
         for (auto& _str : strings)
         {
-            if (str == _str)
+            if (_str == str)
                 return ret;
 
             ret += _str.size() + 1;
@@ -148,6 +148,7 @@ struct Assembler
 
     int assemble(const std::vector<std::string>& lines);
     void parse_tokens(const std::vector<Token>& tokens);
+    void remove_empty_sections();
     void dump();
     void output();
 

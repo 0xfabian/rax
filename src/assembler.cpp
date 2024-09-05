@@ -45,6 +45,7 @@ int Assembler::assemble(const vector<string>& lines)
 
     if (!errors)
     {
+        remove_empty_sections();
         dump();
         output();
     }
@@ -152,25 +153,9 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
     }
 }
 
-void Assembler::dump()
+void Assembler::remove_empty_sections()
 {
-    for (auto& sec : sections)
-    {
-        printf("section %s\n{\n    ", sec.name.c_str());
-
-        for (size_t i = 0; i < sec.bytes.size(); i++)
-        {
-            if (i > 0 && i % 16 == 0)
-                printf("\n    ");
-
-            printf("%02x ", sec.bytes[i]);
-        }
-
-        printf("\n}\n");
-
-        if (&sec != &sections.back())
-            printf("\n");
-    }
+    sections.erase(remove_if(sections.begin(), sections.end(), [](const Section& sec) { return sec.bytes.size() == 0; }), sections.end());
 }
 
 void hexdump(vector<uint8_t> bytes)
@@ -219,54 +204,24 @@ void hexdump(vector<uint8_t> bytes)
     }
 }
 
+void Assembler::dump()
+{
+    for (auto& sec : sections)
+    {
+        cout << sec.name << "\n";
+        hexdump(sec.bytes);
+        cout << "\n";
+    }
+}
+
 void Assembler::output()
 {
-    sections.erase(remove_if(sections.begin(), sections.end(), [](const Section& sec) { return sec.bytes.size() == 0; }), sections.end());
-
     StringTable shstrtab;
-
-    vector<int> section_name_offsets;
-
-    section_name_offsets.push_back(shstrtab.add(""));
-
-    for (auto& sec : sections)
-        section_name_offsets.push_back(shstrtab.add(sec.name));
-
-    section_name_offsets.push_back(shstrtab.add(".shstrtab"));
-    section_name_offsets.push_back(shstrtab.add(".symtab"));
-    section_name_offsets.push_back(shstrtab.add(".strtab"));
-
-    cout << "shstrtab data:\n";
-
-    hexdump(shstrtab.bytes());
-
-    for (size_t i = 0; i < section_name_offsets.size(); i++)
-        cout << i << ": name at " << section_name_offsets[i] << "\n";
-
-    StringTable strtab;
-
-    vector<int> symbol_name_offsets;
-
-    symbol_name_offsets.push_back(strtab.add(""));
-    symbol_name_offsets.push_back(strtab.add(filename));
-
-    for (size_t i = 0; i < sections.size(); i++)
-        symbol_name_offsets.push_back(strtab.add(""));
-
-    for (auto& sym : symbols)
-        symbol_name_offsets.push_back(strtab.add(sym.name));
-
-    cout << "strtab data:\n";
-
-    hexdump(strtab.bytes());
-
-    for (size_t i = 0; i < symbol_name_offsets.size(); i++)
-        cout << i << ": name at " << symbol_name_offsets[i] << "\n";
 
     vector<Elf64_Shdr> shdrs;
 
     Elf64_Shdr null_shdr;
-    null_shdr.sh_name = section_name_offsets[shdrs.size()];
+    null_shdr.sh_name = shstrtab.index_of("");
     null_shdr.sh_type = SHT_NULL;
     null_shdr.sh_flags = 0;
     null_shdr.sh_addr = 0;
@@ -282,7 +237,7 @@ void Assembler::output()
     for (auto& sec : sections)
     {
         Elf64_Shdr shdr;
-        shdr.sh_name = section_name_offsets[shdrs.size()];
+        shdr.sh_name = shstrtab.index_of(sec.name);
 
         shdr.sh_type = sec.attr.progbits ? SHT_PROGBITS : SHT_NOBITS;
         shdr.sh_flags = 0;
@@ -309,12 +264,12 @@ void Assembler::output()
 
     size_t shstrtab_index = shdrs.size();
     Elf64_Shdr shstrtab_shdr;
-    shstrtab_shdr.sh_name = section_name_offsets[shdrs.size()];
+    shstrtab_shdr.sh_name = shstrtab.index_of(".shstrtab");
     shstrtab_shdr.sh_type = SHT_STRTAB;
     shstrtab_shdr.sh_flags = 0;
     shstrtab_shdr.sh_addr = 0;
     shstrtab_shdr.sh_offset = 0;
-    shstrtab_shdr.sh_size = shstrtab.bytes().size();
+    shstrtab_shdr.sh_size = 0;          // fill in later
     shstrtab_shdr.sh_link = 0;
     shstrtab_shdr.sh_info = 0;
     shstrtab_shdr.sh_addralign = 1;
@@ -324,26 +279,27 @@ void Assembler::output()
 
     size_t symtab_index = shdrs.size();
     Elf64_Shdr symtab_shdr;
-    symtab_shdr.sh_name = section_name_offsets[shdrs.size()];
+    symtab_shdr.sh_name = shstrtab.index_of(".symtab");
     symtab_shdr.sh_type = SHT_SYMTAB;
     symtab_shdr.sh_flags = 0;
     symtab_shdr.sh_addr = 0;
     symtab_shdr.sh_offset = 0;
-    symtab_shdr.sh_size = symbol_name_offsets.size() * sizeof(Elf64_Sym); // number of symbol * sizeof
+    symtab_shdr.sh_size = 0;                  // fill in later
     symtab_shdr.sh_link = shdrs.size() + 1;   // section index of strtab so this index + 1
-    symtab_shdr.sh_info = 0;                  // symbol index of first global symbol
+    symtab_shdr.sh_info = 0;                  // fill in later
     symtab_shdr.sh_addralign = 8;
     symtab_shdr.sh_entsize = sizeof(Elf64_Sym);
 
     shdrs.push_back(symtab_shdr);
 
+    size_t strtab_index = shdrs.size();
     Elf64_Shdr strtab_shdr;
-    strtab_shdr.sh_name = section_name_offsets[shdrs.size()];
+    strtab_shdr.sh_name = shstrtab.index_of(".strtab");
     strtab_shdr.sh_type = SHT_STRTAB;
     strtab_shdr.sh_flags = 0;
     strtab_shdr.sh_addr = 0;
     strtab_shdr.sh_offset = 0;
-    strtab_shdr.sh_size = strtab.bytes().size();
+    strtab_shdr.sh_size = 0;    // fill in later
     strtab_shdr.sh_link = 0;
     strtab_shdr.sh_info = 0;
     strtab_shdr.sh_addralign = 1;
@@ -351,10 +307,16 @@ void Assembler::output()
 
     shdrs.push_back(strtab_shdr);
 
+    cout << ".shstrtab\n";
+    hexdump(shstrtab.bytes());
+    cout << "\n";
+
+    StringTable strtab;
+
     vector<Elf64_Sym> syms;
 
     Elf64_Sym null_sym;
-    null_sym.st_name = symbol_name_offsets[syms.size()];
+    null_sym.st_name = strtab.index_of("");
     null_sym.st_info = (STB_LOCAL << 4) | STT_NOTYPE;
     null_sym.st_other = STV_DEFAULT;
     null_sym.st_shndx = SHN_UNDEF;
@@ -364,7 +326,7 @@ void Assembler::output()
     syms.push_back(null_sym);
 
     Elf64_Sym file_sym;
-    file_sym.st_name = symbol_name_offsets[syms.size()];
+    file_sym.st_name = strtab.index_of(filename);
     file_sym.st_info = (STB_LOCAL << 4) | STT_FILE;
     file_sym.st_other = STV_DEFAULT;
     file_sym.st_shndx = SHN_ABS;
@@ -376,10 +338,10 @@ void Assembler::output()
     for (size_t i = 0; i < sections.size(); i++)
     {
         Elf64_Sym sym;
-        sym.st_name = symbol_name_offsets[syms.size()];
+        sym.st_name = strtab.index_of("");
         sym.st_info = (STB_LOCAL << 4) | STT_SECTION;
         sym.st_other = STV_DEFAULT;
-        sym.st_shndx = 1 + i;
+        sym.st_shndx = 1 + i; // 1 from the first null entry
         sym.st_value = 0;
         sym.st_size = 0;
 
@@ -389,7 +351,7 @@ void Assembler::output()
     for (auto& _sym : symbols)
     {
         Elf64_Sym sym;
-        sym.st_name = symbol_name_offsets[syms.size()];
+        sym.st_name = strtab.index_of(_sym.name);
         sym.st_info = STT_NOTYPE;
 
         if (_sym.is_exported || _sym.is_imported)
@@ -410,6 +372,10 @@ void Assembler::output()
         syms.push_back(sym);
     }
 
+    cout << ".strtab\n";
+    hexdump(strtab.bytes());
+    cout << "\n";
+
     sort(syms.begin(), syms.end(), [](const Elf64_Sym& a, const Elf64_Sym& b)
         {
             return (a.st_info >> 4) < (b.st_info >> 4);
@@ -422,6 +388,10 @@ void Assembler::output()
             break;
 
     shdrs[symtab_index].sh_info = global_index;
+    shdrs[symtab_index].sh_size = syms.size() * sizeof(Elf64_Sym);
+
+    shdrs[shstrtab_index].sh_size = shstrtab.bytes().size();
+    shdrs[strtab_index].sh_size = strtab.bytes().size();
 
     Elf64_Ehdr ehdr;
 
@@ -469,7 +439,7 @@ void Assembler::output()
     {
         if ((i - 1) < sections.size())  // real sections
         {
-            cout << "shdr data " << i << "done\n";
+            cout << "shdr " << i << " done\n";
         }
         else
         {
