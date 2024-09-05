@@ -51,10 +51,10 @@ int Assembler::assemble(const vector<string>& lines)
 
     for (auto& sym : symbols)
     {
-        if (!sym.is_defined && !sym.is_imported)
+        if (!sym->is_defined && !sym->is_imported)
         {
             errors++;
-            cerr << "\e[91merror:\e[0m " << "symbol '" + sym.name + "' is undefined\n";
+            cerr << "\e[91merror:\e[0m " << "symbol '" + sym->name + "' is undefined\n";
         }
     }
 
@@ -151,7 +151,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
 
             try
             {
-                current_section()->add(cursor->str);
+                current_section->add(cursor->str);
                 cursor++;
             }
             catch (...)
@@ -173,7 +173,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
         uint64_t count = get_number(*cursor);
 
         for (uint64_t i = 0; i < count; i++)
-            current_section()->add(0);
+            current_section->add(0);
     }
     else
     {
@@ -191,7 +191,7 @@ void Assembler::parse_tokens(const vector<Token>& tokens)
 
 void Assembler::remove_empty_sections()
 {
-    sections.erase(remove_if(sections.begin(), sections.end(), [](const Section& sec) { return sec.bytes.size() == 0; }), sections.end());
+    sections.erase(remove_if(sections.begin(), sections.end(), [](Section* sec) { return sec->bytes.size() == 0; }), sections.end());
 }
 
 void hexdump(vector<uint8_t> bytes)
@@ -244,8 +244,8 @@ void Assembler::dump()
 {
     for (auto& sec : sections)
     {
-        cout << sec.name << "\n";
-        hexdump(sec.bytes);
+        cout << sec->name << "\n";
+        hexdump(sec->bytes);
         cout << "\n";
     }
 }
@@ -294,26 +294,26 @@ void Assembler::output()
     for (auto& sec : sections)
     {
         Elf64_Shdr shdr;
-        shdr.sh_name = shstrtab.index_of(sec.name);
+        shdr.sh_name = shstrtab.index_of(sec->name);
 
-        shdr.sh_type = sec.attr.progbits ? SHT_PROGBITS : SHT_NOBITS;
+        shdr.sh_type = sec->attr.progbits ? SHT_PROGBITS : SHT_NOBITS;
         shdr.sh_flags = 0;
 
-        if (sec.attr.alloc)
+        if (sec->attr.alloc)
             shdr.sh_flags |= SHF_ALLOC;
 
-        if (sec.attr.exec)
+        if (sec->attr.exec)
             shdr.sh_flags |= SHF_EXECINSTR;
 
-        if (sec.attr.write)
+        if (sec->attr.write)
             shdr.sh_flags |= SHF_WRITE;
 
         shdr.sh_addr = 0;
         shdr.sh_offset = 0;
-        shdr.sh_size = sec.bytes.size();
+        shdr.sh_size = sec->bytes.size();
         shdr.sh_link = 0;
         shdr.sh_info = 0;
-        shdr.sh_addralign = sec.attr.align;
+        shdr.sh_addralign = sec->attr.align;
         shdr.sh_entsize = 0;
 
         shdrs.push_back(shdr);
@@ -391,7 +391,7 @@ void Assembler::output()
         sym.st_name = strtab.index_of("");
         sym.st_info = (STB_LOCAL << 4) | STT_SECTION;
         sym.st_other = STV_DEFAULT;
-        sym.st_shndx = 1 + i;               // 1 from the first null entry
+        sym.st_shndx = 1 + i;               // 1 from the first null section
         sym.st_value = 0;
         sym.st_size = 0;
 
@@ -401,22 +401,30 @@ void Assembler::output()
     for (auto& _sym : symbols)
     {
         Elf64_Sym sym;
-        sym.st_name = strtab.index_of(_sym.name);
+        sym.st_name = strtab.index_of(_sym->name);
         sym.st_info = STT_NOTYPE;
 
-        if (_sym.is_exported || _sym.is_imported)
+        if (_sym->is_exported || _sym->is_imported)
             sym.st_info |= STB_GLOBAL << 4;
         else
             sym.st_info |= STB_LOCAL << 4;
 
         sym.st_other = STV_DEFAULT;
 
-        if (_sym.is_imported)
+        if (_sym->is_imported)
             sym.st_shndx = STN_UNDEF;
         else
-            sym.st_shndx = 1; // section of symbol but some sections get removed so ...
+        {
+            size_t i;
 
-        sym.st_value = _sym.is_defined ? _sym.offset : 0;
+            for (i = 0; i < sections.size(); i++)
+                if (_sym->section == sections[i])
+                    break;
+
+            sym.st_shndx = 1 + i; // 1 from first null section
+        }
+
+        sym.st_value = _sym->is_defined ? _sym->offset : 0;
         sym.st_size = 0;
 
         syms.push_back(sym);
@@ -449,14 +457,14 @@ void Assembler::output()
     ehdr.e_ident[EI_MAG3] = 'F';
     ehdr.e_ident[EI_CLASS] = 2;           // 64-bit
     ehdr.e_ident[EI_DATA] = 1;            // little endian
-    ehdr.e_ident[EI_VERSION] = 1;         // Always 1
-    ehdr.e_ident[EI_OSABI] = 0;           // System-V
+    ehdr.e_ident[EI_VERSION] = 1;         // always 1
+    ehdr.e_ident[EI_OSABI] = 0;           // system-v
     ehdr.e_ident[EI_ABIVERSION] = 0;
     ehdr.e_type = ET_REL;
     ehdr.e_machine = EM_X86_64;
-    ehdr.e_version = 1;                   // Always 1
-    ehdr.e_entry = 0;                     // No entry
-    ehdr.e_phoff = 0;                     // No program headers
+    ehdr.e_version = 1;                   // always 1
+    ehdr.e_entry = 0;                     // no entry
+    ehdr.e_phoff = 0;                     // no program headers
     ehdr.e_shoff = sizeof(Elf64_Ehdr);
     ehdr.e_flags = 0;
     ehdr.e_ehsize = sizeof(Elf64_Ehdr);
@@ -500,7 +508,7 @@ void Assembler::output()
         zero_fill(out, shdrs[i].sh_offset);
 
         if ((i - 1) < sections.size())  // real sections
-            out.write((const char*)sections[i - 1].bytes.data(), shdrs[i].sh_size);
+            out.write((const char*)sections[i - 1]->bytes.data(), shdrs[i].sh_size);
         else
         {
             int index = (i - 1) - sections.size();
@@ -523,24 +531,28 @@ void Assembler::output()
 void Assembler::add_section(const string& name, const SectionAttributes& attr)
 {
     for (size_t i = 0; i < sections.size(); i++)
-        if (sections[i].name == name)
+        if (sections[i]->name == name)
         {
-            current_section_id = i;
+            current_section = sections[i];
             return;
         }
 
-    sections.push_back({ name, attr, {}, {} });
-    current_section_id = sections.size() - 1;
+    Section* sec = new Section();
+    sec->name = name;
+    sec->attr = attr;
+
+    current_section = sec;
+    sections.push_back(sec);
 }
 
 void Assembler::add_symbol(const string& name)
 {
     for (auto& sym : symbols)
-        if (sym.name == name)
+        if (sym->name == name)
             return;
 
-    Symbol sym;
-    sym.name = name;
+    Symbol* sym = new Symbol();
+    sym->name = name;
 
     symbols.push_back(sym);
 }
@@ -548,17 +560,17 @@ void Assembler::add_symbol(const string& name)
 void Assembler::export_symbol(const std::string& name)
 {
     for (auto& sym : symbols)
-        if (sym.name == name)
+        if (sym->name == name)
         {
-            if (sym.is_imported)
+            if (sym->is_imported)
                 throw runtime_error("can't export imported symbol");
 
-            sym.is_exported = true;
+            sym->is_exported = true;
         }
 
-    Symbol sym;
-    sym.name = name;
-    sym.is_exported = true;
+    Symbol* sym = new Symbol();
+    sym->name = name;
+    sym->is_exported = true;
 
     symbols.push_back(sym);
 }
@@ -566,20 +578,20 @@ void Assembler::export_symbol(const std::string& name)
 void Assembler::import_symbol(const std::string& name)
 {
     for (auto& sym : symbols)
-        if (sym.name == name)
+        if (sym->name == name)
         {
-            if (sym.is_defined)
+            if (sym->is_defined)
                 throw runtime_error("can't import an already defined symbol");
 
-            if (sym.is_exported)
+            if (sym->is_exported)
                 throw runtime_error("can't import exported symbol");
 
-            sym.is_exported = true;
+            sym->is_exported = true;
         }
 
-    Symbol sym;
-    sym.name = name;
-    sym.is_imported = true;
+    Symbol* sym = new Symbol();
+    sym->name = name;
+    sym->is_imported = true;
 
     symbols.push_back(sym);
 }
@@ -587,26 +599,26 @@ void Assembler::import_symbol(const std::string& name)
 void Assembler::add_label(const string& name)
 {
     for (auto& sym : symbols)
-        if (sym.name == name)
+        if (sym->name == name)
         {
-            if (sym.is_defined)
+            if (sym->is_defined)
                 throw runtime_error("the symbol '" + name + "' is already defined");
 
-            if (sym.is_imported)
+            if (sym->is_imported)
                 throw runtime_error("can't define imported symbol");
 
-            sym.is_defined = true;
-            sym.section_id = current_section_id;
-            sym.offset = current_section()->bytes.size();
+            sym->is_defined = true;
+            sym->section = current_section;
+            sym->offset = current_section->bytes.size();
 
             return;
         }
 
-    Symbol sym;
-    sym.name = name;
-    sym.is_defined = true;
-    sym.section_id = current_section_id;
-    sym.offset = current_section()->bytes.size();
+    Symbol* sym = new Symbol();
+    sym->name = name;
+    sym->is_defined = true;
+    sym->section = current_section;
+    sym->offset = current_section->bytes.size();
 
     symbols.push_back(sym);
 }
@@ -1354,19 +1366,19 @@ void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& op
             else
                 modrm = (mod << 6) + (mid << 3) + low;
 
-            current_section()->add(modrm);
+            current_section->add(modrm);
 
             if (mem)
             {
                 if (mem->sib)
-                    current_section()->add(mem->sib);
+                    current_section->add(mem->sib);
 
-                current_section()->add(mem->offset, mem->offset_size);
+                current_section->add(mem->offset, mem->offset_size);
             }
         }
         else if (byte[0] == 'i')
         {
-            current_section()->add(op->imm, op->size);
+            current_section->add(op->imm, op->size);
 
             op++;
         }
@@ -1381,10 +1393,10 @@ void Assembler::generate_bytes(const Pattern& pattern, const vector<Operand>& op
 
             op++;
 
-            current_section()->add(val);
+            current_section->add(val);
         }
         else
-            current_section()->add(byte);
+            current_section->add(byte);
     }
 
     if (op < operands.end())

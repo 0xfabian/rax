@@ -60,7 +60,7 @@ struct Section
 struct Symbol
 {
     std::string name;
-    size_t section_id;
+    Section* section;
     size_t offset;
     bool is_defined = false;
     bool is_exported = false;
@@ -134,18 +134,16 @@ typedef std::vector<Token>::const_iterator Cursor;
 struct Assembler
 {
     std::string filename;
-    std::vector<Section> sections;
-    size_t current_section_id;
+    std::vector<Section*> sections;
+    Section* current_section;
 
-    std::vector<Symbol> symbols;
+    std::vector<Symbol*> symbols;
     bool first_pass = true;
 
     Cursor cursor;
     Cursor end;
 
     Assembler(const std::string& _filename);
-
-    Section* current_section() { return &sections[current_section_id]; }
 
     int assemble(const std::vector<std::string>& lines);
     void parse_tokens(const std::vector<Token>& tokens);
