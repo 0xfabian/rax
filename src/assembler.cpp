@@ -77,20 +77,20 @@ int Assembler::assemble(const vector<string>& lines)
             }
         }
 
-        for (auto& sec : sections)
-        {
-            if (sec->rels.empty())
-                continue;
+        // for (auto& sec : sections)
+        // {
+        //     if (sec->rels.empty())
+        //         continue;
 
-            cout << ".rela" << sec->name << "\n";
+        //     cout << ".rela" << sec->name << "\n";
 
-            for (auto& rel : sec->rels)
-                cout << "offset = " << rel.offset << "    sym = " << ((rel.sym) ? rel.sym->name : rel.sec->name) << "   type = " << rel.type << "   addend = " << rel.addend << "\n";
+        //     for (auto& rel : sec->rels)
+        //         cout << "offset = " << rel.offset << "    sym = " << ((rel.sym) ? rel.sym->name : rel.sec->name) << "   type = " << rel.type << "   addend = " << rel.addend << "\n";
 
-            cout << "\n";
-        }
+        //     cout << "\n";
+        // }
 
-        dump();
+        // dump();
         output();
     }
 
@@ -391,9 +391,9 @@ void Assembler::output()
 
     shdrs.push_back(strtab_shdr);
 
-    cout << ".shstrtab\n";
-    hexdump(shstrtab.bytes());
-    cout << "\n";
+    // cout << ".shstrtab\n";
+    // hexdump(shstrtab.bytes());
+    // cout << "\n";
 
     Elf64_Sym null_sym;
     null_sym.st_name = strtab.index_of("");
@@ -460,9 +460,9 @@ void Assembler::output()
         syms.push_back(sym);
     }
 
-    cout << ".strtab\n";
-    hexdump(strtab.bytes());
-    cout << "\n";
+    // cout << ".strtab\n";
+    // hexdump(strtab.bytes());
+    // cout << "\n";
 
     sort(syms.begin(), syms.end(), [](const Elf64_Sym& a, const Elf64_Sym& b) { return (a.st_info >> 4) < (b.st_info >> 4); });
 
