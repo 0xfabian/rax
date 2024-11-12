@@ -74,7 +74,7 @@ bool is_number(const string& str)
     return true;
 }
 
-vector<Token> tokenize_line(string line)
+vector<Token> get_tokens(string line)
 {
     clean_line(line);
 

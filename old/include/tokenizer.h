@@ -23,4 +23,4 @@ struct Token
     std::string str;
 };
 
-std::vector<Token> tokenize_line(std::string line);
+std::vector<Token> get_tokens(std::string line);

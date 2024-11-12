@@ -1,0 +1,180 @@
+// AMD64 Architecture Programmer's Manual Volume 3
+// 64-bit long mode only
+
+struct Encoding
+{
+    uint8_t prefix[5];
+
+    bool has_rex;
+    rex rex;
+
+    uint8_t opcode[3];
+
+    bool has_modrm;
+    modrm modrm;
+
+    bool has_sib;
+    sib sib;
+
+    bool has_disp
+    displacement disp
+
+    bool has_imm
+    imm imm;
+};
+
+// General-Purpose Instructions
+
+adc         al      imm8                14 ib
+adc         ax      imm16       op16    15 iw
+adc         eax     imm32       op32    15 id
+adc         rax     imm32       op64    15 id
+adc         rm8     imm8                80 /2 ib
+adc         rm16    imm16       op16    81 /2 iw
+adc         rm32    imm32       op32    81 /2 id
+adc         rm64    imm32       op64    81 /2 id
+adc         rm16    imm8        op16    83 /2 ib
+adc         rm32    imm8        op32    83 /2 ib
+adc         rm64    imm8        op64    83 /2 ib
+adc         rm8     r8                  10 /r
+adc         rm16    r16         op16    11 /r
+adc         rm32    r32         op32    11 /r
+adc         rm64    r64         op64    11 /r
+adc         r8      rm8                 12 /r
+adc         r16     rm16        op16    13 /r
+adc         r32     rm32        op32    13 /r
+adc         r64     rm64        op64    13 /r
+
+for (format : formas[instruction->menmonnic])
+    if (instruction match format)
+        return encode (instru, format->encoding);
+
+return unknoow format for instruction->menmonic;
+
+adcx        r32     rm32        op32    66 0f 38 f6 /r
+adcx        r64     rm64        op64    66 0f 38 f6 /r
+
+add         al      imm8                04 ib
+add         ax      imm16       op16    05 iw
+add         eax     imm32       op32    05 id
+add         rax     imm32       op64    05 id
+add         rm8     imm8                80 /0 ib
+add         rm16    imm16       op16    81 /0 iw
+add         rm32    imm32       op32    81 /0 id
+add         rm64    imm32       op64    81 /0 id
+add         rm16    imm8        op16    83 /0 ib
+add         rm32    imm8        op32    83 /0 ib
+add         rm64    imm8        op64    83 /0 ib
+add         rm8     r8                  00 /0
+add         rm16    r16         op16    01 /r
+add         rm32    r32         op32    01 /r
+add         rm64    r64         op64    01 /r
+add         r8      rm8                 02 /r
+add         r16     rm16        op16    03 /r
+add         r32     rm32        op32    03 /r
+add         r64     rm64        op64    03 /r 
+
+adox        r32     rm32        op32    f3 0f 38 f6 /r
+adox        r64     rm64        op64    f3 0f 38 f6 /r
+
+and
+
+andn        r32     r32     rm32    vex ~rxb.02 0.~src1.0.00 f2 /r   
+andn        r64     r64     rm64    vex ~rxb.02 1.~src1.0.00 f2 /r
+
+bextr       r32     rm32    r32
+bextr       r64     rm64    r64
+bextr       r32     rm32    imm32
+bextr       r64     rm64    imm32
+
+blcfill     r32     rm32
+blcfill     r64     rm64
+
+blci        r32     rm32
+blci        r64     rm64
+
+blcic       r32     rm32
+blcic       r64     rm64
+
+blcmsk      r32     rm32            xop ~rxb.09 0.~dest.0.00 02 /1
+blcmsk      r64     rm64            xop ~rxb.09 1.~dest.0.00 02 /1
+
+blcs
+
+blsfill
+
+blsi
+
+blsic
+
+blsmsk
+
+blsr
+
+bsf
+
+bsr
+
+bswap
+
+bt
+
+btc
+
+btr
+
+bts
+
+bzhi
+
+call (near)
+
+call (far)
+
+cbw
+
+cwde
+
+cdqe
+
+cwd
+
+cdq
+
+cqo
+
+clc
+
+cld
+
+clflush
+
+clflushopt
+
+clwb
+
+clzero
+
+cmc
+
+cmov__
+
+cmp
+
+cmpsb
+
+cmpsw
+
+cmpsd
+
+cmpsq
+
+cmpxchg
+
+cmpxchg8b
+
+cmpxchg16b
+
+cpuid
+
+crc32
