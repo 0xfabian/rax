@@ -6,14 +6,11 @@
 
 struct Symbol;
 
-struct OperandFlags
-{
-    uint64_t data;
-};
+typedef uint64_t OperandType;
 
 struct Operand
 {
-    OperandFlags flags;
+    OperandType type;
 
     int reg;
 
