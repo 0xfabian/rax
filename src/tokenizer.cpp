@@ -78,6 +78,8 @@ bool is_number(const string& str)
     return true;
 }
 
+const Token TokenStream::eos = { EOS, "" };
+
 TokenStream::TokenStream(const std::string& line)
 {
     string cleaned = clean_line(line);
@@ -110,18 +112,6 @@ TokenStream::TokenStream(const std::string& line)
     }
 }
 
-const Token& TokenStream::operator[](size_t i) const
-{
-    size_t index = pos + i;
-
-    if (index < tokens.size())
-        return tokens[index];
-
-    static const Token eos = { EOS, "" };
-
-    return eos;
-}
-
 bool TokenStream::match(TokenType type)
 {
     return operator[](0).type == type;
@@ -139,4 +129,19 @@ bool TokenStream::match(const std::vector<TokenType>& types)
 void TokenStream::advance(size_t n)
 {
     pos = min(pos + n, tokens.size());
+}
+
+const Token& TokenStream::operator[](size_t i) const
+{
+    size_t index = pos + i;
+
+    if (index < tokens.size())
+        return tokens[index];
+
+    return eos;
+}
+
+TokenStream::operator bool() const
+{
+    return pos < tokens.size();
 }

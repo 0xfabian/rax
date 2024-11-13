@@ -29,13 +29,14 @@ struct TokenStream
     std::vector<Token> tokens;
     size_t pos = 0;
 
-    TokenStream(const std::string& line);
+    static const Token eos;
 
-    const Token& operator[](size_t i) const;
+    TokenStream(const std::string& line);
 
     bool match(TokenType type);
     bool match(const std::vector<TokenType>& types);
     void advance(size_t n = 1);
 
-    explicit operator bool() const { return pos < tokens.size(); }
+    const Token& operator[](size_t i) const;
+    explicit operator bool() const;
 };
