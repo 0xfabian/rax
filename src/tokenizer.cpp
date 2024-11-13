@@ -24,17 +24,21 @@ void remove_comment(string& line)
         line = line.substr(0, pos);
 }
 
-void clean_line(string& line)
+string clean_line(const string& line)
 {
-    remove_comment(line);
+    string ret = line;
 
-    replace_substring(line, ":", " : ");
-    replace_substring(line, ",", " , ");
-    replace_substring(line, "[", " [ ");
-    replace_substring(line, "]", " ] ");
-    replace_substring(line, "+", " + ");
-    replace_substring(line, "-", " - ");
-    replace_substring(line, "*", " * ");
+    remove_comment(ret);
+
+    replace_substring(ret, ":", " : ");
+    replace_substring(ret, ",", " , ");
+    replace_substring(ret, "[", " [ ");
+    replace_substring(ret, "]", " ] ");
+    replace_substring(ret, "+", " + ");
+    replace_substring(ret, "-", " - ");
+    replace_substring(ret, "*", " * ");
+
+    return ret;
 }
 
 const char* digits = "0123456789abcdef";
@@ -74,12 +78,11 @@ bool is_number(const string& str)
     return true;
 }
 
-vector<Token> tokenize_line(string line)
+TokenStream::TokenStream(const std::string& line)
 {
-    clean_line(line);
+    string cleaned = clean_line(line);
 
-    istringstream iss(line);
-    vector<Token> tokens;
+    istringstream iss(cleaned);
     string str;
 
     while (iss >> str)
@@ -105,6 +108,35 @@ vector<Token> tokenize_line(string line)
 
         tokens.push_back({ type, str });
     }
+}
 
-    return tokens;
+const Token& TokenStream::operator[](size_t i) const
+{
+    size_t index = pos + i;
+
+    if (index < tokens.size())
+        return tokens[index];
+
+    static const Token eos = { EOS, "" };
+
+    return eos;
+}
+
+bool TokenStream::match(TokenType type)
+{
+    return operator[](0).type == type;
+}
+
+bool TokenStream::match(const std::vector<TokenType>& types)
+{
+    for (size_t i = 0; i < types.size(); i++)
+        if (operator[](i).type != types[i])
+            return false;
+
+    return true;
+}
+
+void TokenStream::advance(size_t n)
+{
+    pos = min(pos + n, tokens.size());
 }

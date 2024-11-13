@@ -6,6 +6,7 @@
 
 enum TokenType
 {
+    EOS,
     REGULAR,
     NUMERIC,
     COLON,
@@ -14,7 +15,7 @@ enum TokenType
     COMMA,
     PLUS,
     MINUS,
-    TIMES
+    TIMES,
 };
 
 struct Token
@@ -23,4 +24,18 @@ struct Token
     std::string str;
 };
 
-std::vector<Token> tokenize_line(std::string line);
+struct TokenStream
+{
+    std::vector<Token> tokens;
+    size_t pos = 0;
+
+    TokenStream(const std::string& line);
+
+    const Token& operator[](size_t i) const;
+
+    bool match(TokenType type);
+    bool match(const std::vector<TokenType>& types);
+    void advance(size_t n = 1);
+
+    explicit operator bool() const { return pos < tokens.size(); }
+};

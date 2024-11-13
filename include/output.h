@@ -37,6 +37,15 @@ struct Section
     std::vector<Relocation> rels;
 };
 
+struct Relocation
+{
+    Symbol* sym;
+    Section* sec;
+    uint64_t offset;
+    int64_t addend;
+    int type;
+};
+
 struct Output
 {
     std::vector<Symbol*> symbols;

@@ -23,9 +23,7 @@ struct Operand
     int index;
 
     uint64_t imm;
-
     Symbol* sym;
-    uint64_t addend;
 };
 
 struct Instruction
