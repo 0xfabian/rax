@@ -7,20 +7,39 @@ using namespace std;
 
 int main(int argc, char** argv)
 {
-    TokenStream ts("main: mov rax, qword ptr [rbx + 3 * rbx + _start - 10]");
+    string input;
 
-    string label;
-
-    if (parse_label(ts, label))
-        cout << "label: " << label << endl;
-
-    Instruction inst;
-
-    if (parse_instruction(ts, inst))
+    while (getline(cin, input))
     {
-        cout << "mnemonic: " << inst.menmonic << endl;
+        cout << "> ";
 
-        for (size_t i = 0; i < inst.operands.size(); i++)
-            cout << "operand " << i << ": " << inst.operands[i].type << endl;
+        if (input == "q")
+            break;
+
+        TokenStream ts(input);
+
+        string label;
+
+        if (parse_label(ts, label))
+            cout << "label: " << label << endl;
+
+        Instruction inst;
+
+        try
+        {
+            if (parse_instruction(ts, inst))
+            {
+                cout << "mnemonic: " << inst.menmonic << endl;
+
+                for (size_t i = 0; i < inst.operands.size(); i++)
+                    cout << "operand " << i << ": " << inst.operands[i].type << endl;
+            }
+        }
+        catch (const exception& e)
+        {
+            cerr << "\e[91merror:\e[0m " << e.what() << '\n';
+        }
     }
+
+    return 0;
 }

@@ -4,8 +4,6 @@
 #include <vector>
 #include <string>
 
-struct Symbol;
-
 typedef uint64_t OperandType;
 
 struct Operand
@@ -23,7 +21,7 @@ struct Operand
     int index;
 
     uint64_t imm;
-    Symbol* sym;
+    std::string symbol;
 };
 
 struct Instruction
