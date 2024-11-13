@@ -94,7 +94,7 @@ TokenStream::TokenStream(const std::string& line)
         if (is_number(str))
             type = NUMERIC;
         else if (str == ":")
-            type = COMMA;
+            type = COLON;
         else if (str == "[")
             type = OPEN_BRACKET;
         else if (str == "]")

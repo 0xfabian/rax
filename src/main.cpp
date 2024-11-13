@@ -1,18 +1,26 @@
 #include <iostream>
 #include <fstream>
 
-#include "tokenizer.h"
+#include "parser.h"
 
 using namespace std;
 
 int main(int argc, char** argv)
 {
-    TokenStream ts("mov rax, qword ptr [rbx + 3 * rbx + _start - 10]");
+    TokenStream ts("main: mov rax, qword ptr [rbx + 3 * rbx + _start - 10]");
 
-    while (ts)
+    string label;
+
+    if (parse_label(ts, label))
+        cout << "label: " << label << endl;
+
+    Instruction inst;
+
+    if (parse_instruction(ts, inst))
     {
-        cout << ts[0].str << "\n";
+        cout << "mnemonic: " << inst.menmonic << endl;
 
-        ts.advance();
+        for (size_t i = 0; i < inst.operands.size(); i++)
+            cout << "operand " << i << ": " << inst.operands[i].type << endl;
     }
 }

@@ -14,3 +14,28 @@ bool parse_label(TokenStream& ts, string& label)
 
     return false;
 }
+
+bool parse_instruction(TokenStream& ts, Instruction& inst)
+{
+    return false;
+}
+
+bool parse_operand(TokenStream& ts, Operand& op)
+{
+    return parse_register(ts, op) || parse_memory(ts, op) || parse_immediate(ts, op);
+}
+
+bool parse_register(TokenStream& ts, Operand& op)
+{
+    return false;
+}
+
+bool parse_memory(TokenStream& ts, Operand& op)
+{
+    return false;
+}
+
+bool parse_immediate(TokenStream& ts, Operand& op)
+{
+    return false;
+}
