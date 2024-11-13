@@ -9,11 +9,11 @@ int main(int argc, char** argv)
 {
     string input;
 
-    while (getline(cin, input))
+    while (true)
     {
         cout << "> ";
 
-        if (input == "q")
+        if (!getline(cin, input) || input == "q")
             break;
 
         TokenStream ts(input);
