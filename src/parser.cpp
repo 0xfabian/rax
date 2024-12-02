@@ -126,8 +126,8 @@ bool parse_memory(TokenStream& ts, Operand& op)
     {
         if (has_size)
             throw runtime_error("expected [ after memory prefix");
-        else
-            return false;
+        
+        return false;
     }
 
     size_t i = 0;
