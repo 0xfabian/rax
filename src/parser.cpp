@@ -33,7 +33,7 @@ bool parse_instruction(TokenStream& ts, Instruction& inst)
         if (parse_operand(ts, op))
             inst.operands.push_back(op);
         else
-            break;
+            throw runtime_error("expected operand after comma");
 
     } while (ts.match(COMMA));
 
@@ -126,7 +126,7 @@ bool parse_memory(TokenStream& ts, Operand& op)
     {
         if (has_size)
             throw runtime_error("expected [ after memory prefix");
-        
+
         return false;
     }
 
@@ -154,15 +154,98 @@ bool parse_memory(TokenStream& ts, Operand& op)
 
 bool parse_immediate(TokenStream& ts, Operand& op)
 {
-    // should really be a constant expression
+    Constant constant;
 
-    if (!ts.match(NUMERIC))
+    if (!parse_constant(ts, constant))
         return false;
 
     op.type = 1;
-    op.imm = 0;
-
-    ts.advance();
+    op.imm = constant.offset;
+    op.symbol = constant.symbol;
 
     return true;
+}
+
+uint64_t prefix_stoull(const string& str)
+{
+    if (str.size() > 2 && str[0] == '0' && (str[1] == 'b' || str[1] == 'x'))
+    {
+        int base = (str[1] == 'b') ? 2 : 16;
+
+        return stoull(str.substr(2), nullptr, base);
+    }
+
+    return stoull(str);
+}
+
+bool parse_constant_atom(TokenStream& ts, Constant& c)
+{
+    if (ts.match(NUMERIC))
+    {
+        c.offset = prefix_stoull(ts[0].str);
+        ts.advance();
+
+        return true;
+    }
+
+    if (ts.match(REGULAR))
+    {
+        c.symbol = ts[0].str;
+        ts.advance();
+
+        return true;
+    }
+
+    return false;
+}
+
+bool parse_constant_unary(TokenStream& ts, Constant& c)
+{
+    bool negative = false;
+
+    if (ts.match(MINUS))
+    {
+        negative = true;
+        ts.advance();
+    }
+
+    if (!parse_constant_atom(ts, c))
+    {
+        if (negative)
+            throw runtime_error("expected constant expression after -");
+
+        return false;
+    }
+
+    if (negative)
+        c = -c;
+
+    return true;
+}
+
+bool parse_constant_sum(TokenStream& ts, Constant& c)
+{
+    if (!parse_constant_unary(ts, c))
+        return false;
+
+    while (ts.match_any({ PLUS, MINUS }))
+    {
+        TokenType op = ts[0].type;
+
+        ts.advance();
+
+        Constant rhs;
+
+        if (!parse_constant_unary(ts, rhs))
+            throw runtime_error("expected constant expression after + or -");
+
+        c = (op == PLUS) ? c + rhs : c - rhs;
+    }
+
+    return true;
+}
+
+bool parse_constant(TokenStream& ts, Constant& c)
+{
+    return parse_constant_sum(ts, c);
 }

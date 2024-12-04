@@ -126,6 +126,15 @@ bool TokenStream::match(const std::vector<TokenType>& types)
     return true;
 }
 
+bool TokenStream::match_any(const std::vector<TokenType>& types)
+{
+    for (auto type : types)
+        if (match(type))
+            return true;
+
+    return false;
+}
+
 void TokenStream::advance(size_t n)
 {
     pos = min(pos + n, tokens.size());

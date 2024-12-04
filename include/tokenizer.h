@@ -35,6 +35,7 @@ struct TokenStream
 
     bool match(TokenType type);
     bool match(const std::vector<TokenType>& types);
+    bool match_any(const std::vector<TokenType>& types);
     void advance(size_t n = 1);
 
     const Token& operator[](size_t i) const;
