@@ -156,7 +156,7 @@ bool parse_immediate(TokenStream& ts, Operand& op)
 {
     Constant constant;
 
-    if (!parse_constant(ts, constant))
+    if (!parse_constant_sum(ts, constant))
         return false;
 
     op.type = 1;
@@ -243,9 +243,4 @@ bool parse_constant_sum(TokenStream& ts, Constant& c)
     }
 
     return true;
-}
-
-bool parse_constant(TokenStream& ts, Constant& c)
-{
-    return parse_constant_sum(ts, c);
 }

@@ -15,4 +15,4 @@ bool parse_register(TokenStream& ts, Operand& op);
 bool parse_memory(TokenStream& ts, Operand& op);
 bool parse_immediate(TokenStream& ts, Operand& op);
 
-bool parse_constant(TokenStream& ts, Constant& c);
+bool parse_constant_sum(TokenStream& ts, Constant& c);
