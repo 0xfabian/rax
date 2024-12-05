@@ -24,18 +24,27 @@ bool parse_instruction(TokenStream& ts, Instruction& inst)
 
     inst.menmonic = ts[0].str;
 
+    ts.advance();
+
+    if (ts.match(EOS))
+        return true;
+
     Operand op;
 
-    do
+    if (!parse_operand(ts, op))
+        throw runtime_error("expected operand after mnemonic");
+
+    inst.operands.push_back(op);
+
+    while (ts.match(COMMA))
     {
         ts.advance();
 
-        if (parse_operand(ts, op))
-            inst.operands.push_back(op);
-        else
+        if (!parse_operand(ts, op))
             throw runtime_error("expected operand after comma");
 
-    } while (ts.match(COMMA));
+        inst.operands.push_back(op);
+    }
 
     if (!ts.match(EOS))
         throw runtime_error("junk after instruction");
